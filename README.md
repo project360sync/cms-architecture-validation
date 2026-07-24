@@ -21,8 +21,8 @@ content) to be **validated before implementation**.
   validate before writing any code.
 - **§14 — i18n** — how multi-language fits as a natural extension (locale-scoped
   content, fallback + staleness, AI-translation), and **§14.5 reflow-safe
-  animation** — the resolution to the reflow limit: animate length-tolerant
-  sections, keep motion restrained, put `maxLength` hints on length-sensitive slots.
+  animation** — mitigation for the reflow limit: animate length-tolerant sections,
+  keep motion restrained, constrain sensitive slots, and test locale/viewport states.
 - **§15 — independent review** — conditional validation, P0/P1 implementation gates,
   and the smallest vertical pilot that can prove or disprove the proposal.
 
