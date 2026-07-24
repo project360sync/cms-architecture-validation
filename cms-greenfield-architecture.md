@@ -719,7 +719,12 @@ Enyhén **Postgres+JSONB** felé húz (relációs status-query: „az összes st
 lezárása után induljon. A jelenlegi dokumentum termék-tézisként elég erős, de még nem
 végrehajtható biztonsági és adatkonzisztencia-specifikáció.
 
-### 15.1 P0 — implementáció előtti blokkolók
+### 15.1 P0 — capability- és release-gate-ek
+
+A P0 itt nem azt jelenti, hogy mind a hét pontot a legelső spike előtt meg kell építeni.
+Az adott release-ben vállalt capabilityre vonatkozik: `fixed-only` release-nek nem kell
+`composable` runtime, single-locale release-nek nem kell locale-policy. Az alkalmazandó
+P0 azonban kötelező az adott capability élesítése előtt; a fázisbontást a §15.3 rögzíti.
 
 1. **Fix vs kompozíciós render-szerződés.** A már DOM-ban lévő fix példány hidratálása
    nem tudja megvalósítani a kliens általi section add/reorder funkciót. A két mód
@@ -738,14 +743,17 @@ végrehajtható biztonsági és adatkonzisztencia-specifikáció.
 4. **Migrációs protokoll.** Stabil példány-id, explicit rename/transform manifest,
    dry-run diff, quarantine, preview, atomi aktiválás és rollback nélkül a
    „tartalom túléli a redesign-t" fő ígéret nincs bizonyítva.
-5. **Draft/publish konzisztencia.** Optimistic concurrency (`revision`/ETag), audit log,
-   draft és published revision, valamint site+locale snapshot szintű atomi publish kell.
-   A statikus fájlokat staging prefixre kell írni, majd egy manifest/pointer váltással
-   aktiválni; részleges export nem kerülhet élőbe.
+5. **Draft/publish konzisztencia.** Minden release-hez immutable draft/published revision
+   és site+locale snapshot szintű atomi publish kell. A v1 kizárólagos, pesszimista
+   edit-lockot használhat; `revision`/ETag alapú optimistic concurrency akkor kapu, ha
+   ugyanazon oldalon párhuzamos írást, offline editet vagy kollaborációt vállalunk (§15.7).
+   A statikus fájlokat staging prefixre kell írni, majd manifest/pointer váltással
+   aktiválni; részleges export nem kerülhet élőbe. Audit/RBAC a production-pilot kapuja.
 6. **Futtatási izoláció és életciklus.** Az author bundle teljes jogú kód. Az editor
-   preview ne a CMS saját originen fusson, hanem sandboxolt, külön originen. Definiálni
-   kell a bundle hookjait (`mount`, `refresh`, `destroy`), mert az újrarender,
-   locale-váltás és preview-navigáció különben listener/ScrollTrigger szivárgást okoz.
+   Edit és Preview nézete se a CMS admin originjén/DOM-jában fusson, hanem sandboxolt,
+   külön preview-originen (§15.7). Definiálni kell a bundle hookjait (`mount`, `refresh`,
+   `destroy`), mert az újrarender, locale-váltás és preview-navigáció különben
+   listener/ScrollTrigger szivárgást okoz.
 7. **Locale publish-policy.** A fallback preview-kényelem, nem általános publikációs
    garancia. A required/fallback/hidden policy, a stale kontextus és az atomi locale
    release nélkül a rendszer kevert nyelvű vagy részben régi oldalt publikálhat.
@@ -770,7 +778,8 @@ végrehajtható biztonsági és adatkonzisztencia-specifikáció.
 
 A review-egyeztetés alapján (lásd a PR-diszkussziót) a P0/P1 tételek **három fázisra**
 oszlanak. A mag-hipotézist a **v1 minimál spike** olcsón bizonyítja; a nehéz platform-részek
-később jönnek. A 7 P0 marad végső release-gate, de nem mind a spike előfeltétele.
+később jönnek. Minden P0 az érintett capability release-gate-je, nem mind a spike
+előfeltétele és nem mind alkalmazandó egy `fixed-only`, single-locale release-re.
 
 **(A) v1 minimál spike — `fixed-only`, single-editor, single-locale**
 Cél: bizonyítani, hogy a tartalom túléli a redesignt, és a client-safe szerkesztés + a
@@ -835,12 +844,12 @@ jobban szolgálja.
 | 2 | **Explicit migration map kell.** | Az automatikus névegyezés csak változatlan mezőt vihet tovább. Rename/split/merge/type-change fejlesztői döntés; törlés quarantine. |
 | 3 | **Egy content-séma, két explicit template-mód.** | `fixed` és `composable` együtt élhet, de a render-algoritmusuk és engedélyezett editor-parancsaik nem keverhetők (§4.2). |
 | 4 | **Bespoke GSAP alapból `fixed`; composable csak lifecycle-kompatibilis sectionnel.** | Általános JS-t nem lehet statikusan „reorder-safe"-nek bizonyítani. Ezt capabilityként a manifestben a fejlesztő vállalja, majd teszt igazolja. |
-| 5 | **Első implementáció: Postgres + object storage.** | A revision, optimistic lock, audit, jogosultság, publish pointer és referenciális integritás relációs. JSONB jó verziózott content-snapshotnak, de nem helyettesíti az alkalmazás-sémát. Bináris asset nem adatbázisba kerül. |
+| 5 | **Production baseline: Postgres + object storage; a spike maradhat Mongón.** | A revision, audit, jogosultság, publish pointer és referenciális integritás relációs. JSONB jó verziózott content-snapshotnak, de nem helyettesíti az alkalmazás-sémát. Bináris asset nem adatbázisba kerül. A persistence-migráció nem része a mag-tézist vizsgáló spike-nak (§15.7). |
 | 6 | **Inline a kiválasztás és gyors text/asset edit; panel a teljes, kanonikus űrlap.** | Így az inline élmény nem hoz létre második validációs útvonalat. Strukturált richtext, URL, select, color, boolean, SEO és hibajavítás panelben történik. |
 | 7 | **Agnosztikus a build-outputnál, nem a forrás-frameworknél.** | A bemeneti szerződés renderelt statikus HTML/CSS + támogatott ES bundle + manifest. React/Vue runtime, szerverkomponens vagy tetszőleges app-kód importja már platform/runtime termék lenne. |
 | 8 | **Média immutable asset-id-val kötődik.** | A mező locale-specifikus alt/caption/crop metaadatot, nem fájl-URL-t tárol. Soft delete + reference graph + retention után GC; re-ingeszt asset-id-t reconciliál. |
 | 9 | **Template-import privilegizált build, content-edit nem kód.** | Külön jogosultság, izolált fetch/unpack/build, külön preview origin; minden content-írás ugyanazon tipizált command API-n megy át. |
-| 10 | **Revision-alapú draft, atomi release pointer.** | Az autosave új draft revisiont ír ETag ellenőrzéssel. A publish egy validált site/locale snapshotot aktivál; nem fájlonként frissíti az élő oldalt. |
+| 10 | **Revision-alapú draft, atomi release pointer.** | V1-ben az autosave kizárólagos edit-lock alatt ír immutable draft revisiont; kollaboratív módban ETag/lost-update kontroll kell. A publish mindkét esetben validált site/locale snapshotot aktivál, nem fájlonként frissíti az élő oldalt. |
 
 ### 15.6 Kettős go/no-go kapu
 
