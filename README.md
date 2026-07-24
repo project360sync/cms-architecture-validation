@@ -1,29 +1,29 @@
 # CMS architecture — validation
 
-Design proposal for a **client-safe CMS layer** (annotated templates + typed
-content) to be **validated before implementation**.
+Design + business proposal for a **client-safe CMS layer** (annotated templates +
+typed content), used by *us as the agency* to build bespoke animated sites clients
+can self-edit. **To be validated before implementation.**
 
-- **[cms-greenfield-architecture.md](cms-greenfield-architecture.md)** — the full
-  greenfield conception: the two-layer model (structure ⟂ typed content), the
-  annotation convention, the content/schema data model, the pipelines
-  (onboarding import → render/merge → static export → reconciled re-ingest),
-  the editor model, JS/animation handling, storage, a robustness/fragility
-  analysis, prior-art mapping (Shopify OS 2.0, Instatic), and an **i18n extension.**
+## Documents
+
+- **[cms-greenfield-architecture.md](cms-greenfield-architecture.md)** — the technical
+  conception: the two-layer model (structure ⟂ typed content), the annotation
+  convention, the content/schema data model, the pipelines (onboarding import →
+  render/merge → static export → reconciled re-ingest), the editor model, JS/animation
+  handling, storage, robustness analysis, prior-art mapping (Shopify OS 2.0, Instatic),
+  and an **i18n extension**.
+- **[go-to-market.md](go-to-market.md)** — the business model: target audience, the
+  HU-calibrated pricing (build + operation), the pricing levers, a **sourced competitor
+  analysis** (HU agencies + international builders), the future self-serve direction, and
+  the business validation questions.
 
 ## Where to focus when validating
 
-- **§0 — TL;DR** — the thesis in one paragraph.
-- **§11 — Open questions** — concrete technical points to stress-test.
-- **§12 — Limits & when to choose otherwise** — the honest scope: what the model
-  does NOT answer, the sharpest internal limit (GSAP × content-reflow), and
-  **§12.5 the demand question** — the most important, non-technical thing to
-  validate before writing any code.
-- **§14 — i18n** — how multi-language fits as a natural extension (locale-scoped
-  content, fallback + staleness, AI-translation), and **§14.5 reflow-safe
-  animation** — the resolution to the reflow limit: animate length-tolerant
-  sections, keep motion restrained, put `maxLength` hints on length-sensitive slots.
+- **Tech — §11** open questions · **§12** limits & when to choose otherwise (§12.5 the
+  demand question) · **§14.5** reflow-safe animation.
+- **Business — §6** the validation questions (demand, real hours, recurring acceptance).
 
-The document is self-contained: a reviewer (human or AI) can read it cold,
-without the originating conversation.
+Docs are self-contained: a reviewer (human or AI) can read them cold, without the
+originating conversation.
 
-> Note: the doc is written in Hungarian.
+> Note: both docs are written in Hungarian.
