@@ -1,0 +1,18 @@
+# claude-cms test evidence
+repo: https://github.com/peterjuhasz/claude-cms.git
+branch: feat/vibor-gsap-cms
+commit: 0b56a13d631c1d88be2a1b118f373b50a02b1ec2
+date: 2026-07-24T18:00:42Z
+command: npm test (vitest run)
+---
+> claude-cms@0.1.0 test
+> vitest run
+
+
+ RUN  v4.1.9 /Users/jarvis/Documents/projects/claude-cms/.claude/worktrees/vibor-gsap-cms
+
+
+ Test Files  19 passed (19)
+      Tests  176 passed (176)
+   Start at  20:00:43
+   Duration  2.91s (transform 828ms, setup 124ms, import 4.57s, tests 6.61s, environment 1ms)

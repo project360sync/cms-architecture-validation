@@ -1,0 +1,22 @@
+# Phase-6 run audit — round 3b (fresh re-audit after remediation) — verbatim
+Agent: independent Phase-6 auditor, 2026-07-24. Fresh instance; the prior audit (audit-round3.md) and its remediation were NOT assumed correct — every item re-derived independently.
+
+AUDIT: PASS — run state `valid`; reportable document status `verification pending`.
+
+## Re-derived document status (independent)
+`verification pending`.
+Derivation: all 7 metrics = 9/10 effective (round 3: EG/C/IC/A = 9 via scorer-common; F/H/MQ = 9 via scorer-prd) AND conformance = PASS (round 3: 0 defects, 2 NOTEs, no SPEC-AMBIGUITY). But §10 carries three OPEN load-bearing assumptions — A1 (demand exists), A3 (off-the-shelf tools fail on bespoke GSAP), A5 (GSAP survives reflow) — none testable until Gate A (close 2026-11-30) and Gate B run. Under the skill invariant, an open load-bearing assumption caps the run at `verification pending`; `done` is unreachable. D1–D4 confirm user *decisions* (not evidence); D5 is an unconfirmed provisional decision (confirm-by 2026-07-31). Declared status (doc header: "run: `verification pending`"; manifest: `verification pending`) MATCHES the re-derivation. This is the expected terminal state for a pre-validation PRD, not a failure.
+
+## Per-item results
+1. EXIT LAWFULNESS — PASS. Re-derived `verification pending` from doc + ledger independently; matches declared. Doc header (§ line 4) now states "Status: draft — QC: minden metrika 9/10 + conformance PASS; run: `verification pending` a Gate A/B zárásáig" — reconciles doc-status with run-status, not misleading (prior Finding 4 resolved).
+2. MANIFEST COMPLETENESS — PASS. All five template blob SHAs listed and independently verified equal to the rubrics § Compatibility baseline (re-computed at prompt-collection main HEAD `9257a9b` — all five match). Anchor-vs-HEAD relationship now stated CORRECTLY per rubrics § Compatibility: source commit `9257a9b` = fetched main HEAD, explicitly NOT the reviewed anchor `8e6b3f9e` (which was independently confirmed to exist), proceeding lawful because blobs matched baseline (prior Finding 2 resolved). Fetch mode (network gh api blob verification + local committed clone read at same commit), rounds 1/2/3 ledgers, round-3 hash table + normalization procedure all present.
+3. AUDITABLE ARTIFACTS — PASS. All three rounds persisted (scores-round1/2/3) including the round-1 glitched/discarded conformance instance (recorded, re-run fresh). Round-3 scorer outputs carry the per-metric quote+pointer schema with ≥3 findings each and explicit "missing for 10". Prior audit audit-round3.md persisted with agent identity + timestamp + a remediation note.
+4. BLINDNESS — PASS. Each round records fresh instances and explicit exclusions (round-3 README: "scores-round1/, scores-round2/ and the manifest ledger sections were explicitly excluded"; round-2 ledger states the same; round 1 trivially blind).
+5. BUNDLE PROVENANCE — PASS. evidence-arch, evidence-gtm, and evidence-cms each now meet the typed git provenance rule: named repo (github.com/project360sync/cms-architecture-validation for arch/gtm; peterjuhasz/claude-cms for cms), full 40-char SHA (`9575ab82ad0c9e35f759f51aef8b823a7e76fd7e` for arch/gtm; `0b56a13d…` for cms), clean-tree / "file unchanged since" note, and permalink form (blob/<sha>/<file>). Commit `9575ab82ad0c9e35f759f51aef8b823a7e76fd7e` independently confirmed to exist in the named repo (`git cat-file -t` = commit; it is Merge PR #2 and an ancestor of HEAD; both cms-greenfield-architecture.md and go-to-market.md present as blobs at that commit and unchanged in the working tree). Test log matches evidence-cms claims exactly (19 files / 176 tests). D5 row exists in the standalone decision-register.md (line 8) and matches doc §11 (dates, provisional status, owner László, confirm-by 2026-07-31) (prior Finding 3 resolved).
+
+## Findings
+None blocking. All four prior-audit findings independently verified as genuinely remediated.
+
+Observation (non-blocking, not a defect): the arch/gtm evidence pointers resolve at named § headings rather than `#L…` line anchors (the source is Hungarian prose keyed by section number). The four typed-provenance requirements are all satisfied and pointers are reproducible at the pinned commit, so this does not fail item 5; it is noted only for parity with the evidence-cms `#L` granularity.
+
+Conclusion: run is VALID; the reportable document status is `verification pending`.
