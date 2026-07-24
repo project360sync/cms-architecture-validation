@@ -903,3 +903,237 @@ sandboxolt originen kell futnia.
 maradhat a jelenlegi **Mongón**; a Postgres+JSONB greenfield-döntést (§15.5 #5) nem kell a
 mag-tézis validációjához előre megfizetni — a revision/audit/RBAC/publish-pointer relációs
 igénye a production pilotnál válik esedékessé.
+
+---
+
+## 16. Review-kör 2 — feloldott blokkolók (adverzariális review)
+
+> Egy második, **adverzariális** review-kör (négy független ügynök: red-team, architektúra,
+> security, termék/kereslet) néhány **tartógerendára** konvergált. A koncepció kiállta a
+> támadást — a §15 P0-kapuk állnak —, de három KRITIKUS blokkoló doc-szintű feloldást igényelt,
+> mielőtt a fixed-only spike adat/render-rétege lekódolható. Ez a szekció ezeket zárja le
+> (kanonikus séma, reconciliation-teljesség, sink-lista), finomítja a v1 concurrency néma-vesztés
+> rését, feloldja a store-szóhasználatot, és **megfordítja a közeli szekvenálást** (kereslet-kapu
+> a technikai spike előtt).
+
+### 16.1 Kanonikus tartalom-séma (P0.2 feloldva)
+
+**Döntés: egyetlen normatív alak.** A §3.3, §14.1 és a §4.2/§4.4 pszeudokód eddig három eltérő
+alakot mutatott. Ezek közül a §14.1 lapos `hero.line1` kulcs **hibás**, mert a *típusra* kulcsol,
+holott egy típusból több példány is lehet (§3.2), így két `hero` ütközne. Az alábbi az egyetlen
+érvényes alak; a korábbi példák illusztratívak, és **ez felülírja őket.**
+
+Identity-szintek (mind explicit, egyik sem pozícióból származtatott):
+
+| Szint | Kulcs | Egyediség | Példa |
+|---|---|---|---|
+| site | `siteId` | globális | `site_v1b0r` |
+| page | `pageId` | site-on belül | `home` |
+| locale | `locale` | ISO kód | `hu` |
+| section-instance | `sectionInstanceId` | page-en belül | `hero-1` |
+| block | `blockId` | section-instance-en belül | `blk_9f2` |
+| collection | `collectionName` | site-on belül | `termekek` |
+| collection-item | `itemId` | collection-on belül | `itm_7f3a` |
+| field | `(scopeId, fieldName)` | scope-on belül | `(hero-1, line1)` |
+
+**Kulcs-invariánsok:**
+- **A mező sosem a típusra kulcsol.** A mezőidentitás mindig `(scopeId, fieldName)`, ahol a scope
+  egy section-instance, block vagy collection-item. A DOM-annotáció a **csupasz** nevet hordozza
+  (`data-cms-field="line1"`), a renderer/reconciler a befoglaló `data-cms-section-id` /
+  `data-cms-item` / block-scope alapján kvalifikálja. Ez feloldja a §3.2 (csupasz) ⟂ §10
+  (`hero.line1`) annotáció-ellentmondást is: a helyes annotáció a **csupasz** név.
+- **A blokknak stabil `id`-ja van** (`{ "id":"blk_9f2", "type":"gcard", "settings":{…} }`), nem
+  tömb-index — enélkül pozíció-horgonyzott lenne, épp az a törékenység, ami ellen a modell érvel (§8).
+- **A struktúra (order / type / collection-referencia) locale-független; csak a mezőértékek
+  locale-scoped-ek.** Kivétel a `composable` per-locale order (§14.4): külön, opcionális felülírás —
+  nem az alap.
+
+**Kanonikus váz** (egy oldal, két locale, egy kollekció):
+
+```jsonc
+{
+  "schemaVersion": 2,
+  "siteId": "site_v1b0r",
+  "defaultLocale": "hu",
+  "locales": ["hu", "en"],
+  "pages": {
+    "home": {
+      "template": {                          // STRUKTÚRA — locale-független
+        "mode": "fixed",
+        "order": ["hero-1", "products-1"],
+        "sections": {
+          "hero-1":     { "type": "hero" },
+          "products-1": { "type": "products", "collection": "termekek" }
+        }
+      },
+      "content": {                           // ÉRTÉKEK — locale-scoped, scope=példány-id
+        "hu": { "fields": { "hero-1": { "line1": "FÉM.",  "line2": "ÜVEG."  } } },
+        "en": { "fields": { "hero-1": { "line1": "METAL.","line2": "GLASS." } } }
+      }
+    }
+  },
+  "collections": {
+    "termekek": [
+      { "id": "itm_7f3a",
+        "fields": { "hu": { "title": "Berg Passive" }, "en": { "title": "Berg Passive" } },
+        "assets": { "img": { "assetId": "ast_abc", "alt": { "hu": "…", "en": "…" } } } }
+    ]
+  }
+}
+```
+
+**JSON Schema a spike előtt.** Egy `content.schema.json` rögzíti a fenti alakot: required kulcsok,
+id-formátumok, és a **referenciális integritás** (minden `order`-id létezik a `sections`-ben; minden
+`collection`-referencia létező kollekcióra mutat; minden `assetId` létező assetre). A render /
+reconcile / i18n mind ezt az **egy** alakot fogyasztja: a §4.2 `render(template, content, locale)`
+szignatúrát kap, és a hidratálás a §14.2 `resolve(field, locale)`-on megy át (fallback / required /
+hidden policy a hidratáláson **belül**, locale-publikálást bukathat).
+
+### 16.2 Reconciliation & migráció — teljes protokoll (P0.4 kiegészítés)
+
+A §4.4 auto-name-match csak *törlésre* védett (quarantine). Az adverzariális kör három nem kezelt
+esetet talált, amelyek cáfolják a „nincs vak felülírás" ígéretet. Feloldás:
+
+**Precedencia (definiálva):** az explicit migrációs manifest **mindig nyer**; az automatikus
+név-egyezés csak a *maradékot* viszi tovább — azokat a `(scopeId, fieldName)` párokat, amelyek neve
+ÉS típusa változatlan, **ugyanabban a scope-ban.** A manifest a `(from-templateVersion →
+to-templateVersion)` párra van kulcsolva.
+
+**Név-csere (`line1`↔`line2`) — némán korrupt volt, most tiltott.** Mivel a match scope+név szerint
+történik, a csere két egyidejű átnevezésként detektálható. Ha egy scope-on belül a mező-névhalmaz
+megváltozik (nem tiszta hozzáadás/törlés), az auto-match **nem cross-assignol**: vagy explicit
+`rename`/`move` bejegyzés kell, vagy a nem egyértelmű mezők quarantine-ba mennek. Néma
+érték-áthelyezés nem történhet.
+
+**Slot mozgatása szekciók között — most explicit `move`.** `move: hero-1.tagline → intro-1.tagline`.
+Enélkül az érték elárvul (quarantine), nem tűnik el némán.
+
+**Kollekció item-séma változás — nem fail-close-olja az egész oldalt.** Új mező default `optional`.
+Egy meglévő mező `required`-dé tétele (pl. `altRequired:true`) **migráció**, ami vagy default-értéket
+ad, vagy az érintett sorokat **draft-quarantine**-ba teszi és az adott locale/section
+publikálhatóságát blokkolja egy világos diffel — **nem** a teljes site-publisht bukatja némán.
+
+**Migrációs operátorok (specifikálva):**
+
+| Operátor | Szemantika | Rollback |
+|---|---|---|
+| `rename` | `scope.a → scope.b`, érték változatlan | inverz rename |
+| `move` | `scopeA.f → scopeB.f` | inverz move |
+| `transform` | tiszta, verziózott függvény az értéken (nincs I/O) | ha nem invertálható → forrás quarantine-ban marad |
+| `split` | `f → [f1, f2]` explicit mappinggel | merge inverz |
+| `merge` | `[f1, f2] → f` explicit kombinátorral | split inverz |
+| `delete` | `f → quarantine` (nem hard-törlés) | restore quarantine-ból |
+
+**Hatókör:** az operátorok **section-instance, block, collection-item ÉS item-mező** szinten is
+működnek (nem csak page-mezőn). A `transform` determinisztikus és mellékhatás-mentes, hogy a dry-run
+és a rollback reprodukálható legyen.
+
+**Kötelező dry-run diff** (a §4.4-ből P0.4-be emelve): a re-ingeszt előbb egy diffet ad
+(`kept / renamed / moved / transformed / quarantined / new-empty`), ami emberi jóváhagyás nélkül nem
+aktiválható; az aktiválás atomi (előző template+content verzió rollbackhez megmarad).
+
+### 16.3 Biztonságos render-szerződés — teljes sink-lista + import-izoláció (P0.3 kiegészítés)
+
+**Mezőtípus → sink (teljes):**
+
+| Típus | Sink | Policy |
+|---|---|---|
+| `text` / `longtext` | `textContent` | nincs markup |
+| `richtext` | sémázott AST → allowlisted elemek | **a node-attribútumok is szűrve: `href` a `url`-policyn át; `style`/`class`/`on*` eldobva** |
+| `url` | attribútum, kódolva | csak `https:`/`mailto:`/relatív; `javascript:`/`data:` tiltott; kontroll/whitespace normalizálva (`java\tscript:`); protokoll-relatív `//host` tiltott; külső `target=_blank` → `rel="noopener noreferrer"` |
+| `image` | asset-id → szerveroldali MIME/decode | SVG-média **rasterize-by-default** |
+| `color` | **CSS-token validáció** | csak szigorú szín-token; nyers érték sosem kerül `style`/custom-propertybe |
+| `select`/`number`/`boolean` | enum/típus-validált token | CSS-kontextusba csak allowlisted token |
+| `svg` (ha nem `image`) | sanitize **nevesített, tesztelt** konfiggal | `script`/`foreignObject`/`use[href]`/`<style>` strip; egyébként rasterize |
+
+- **CSS-as-content most explicit sink.** A §4.2 „attribútumérték sosem nyers interpolációval"
+  állítása eddig nem fedte a `style`/custom-property kontextust: `color`/`select`/`number` oda
+  folyhatott. Mostantól bármely CSS-be kerülő érték allowlisted token, nyers string sosem.
+- **`svg` mezőtípus-inkonzisztencia feloldva** (P0.3 vs §3.4): vagy valódi `svg` típus a fenti
+  sanitize-konfiggal, vagy az `image` úton szerveroldali rasterizálás; a „lebegő" SVG-hivatkozás
+  megszűnik.
+
+**Import-izoláció (P0.3 / §4.1 — a fenyegetéslistából kontrollok):**
+- **Fetch:** minden import-fetch **egress-allowlist proxyn** át; link-local és RFC1918
+  (`169.254.0.0/16`, `10/8`, `172.16/12`, `192.168/16`, `::1`, …) tiltva (SSRF / cloud-metadata);
+  a redirect-célt **újra** validálni (DNS-rebind-biztos).
+- **Unpack:** entry-count, kicsomagolt-méret, kompressziós ráta és path-traversal (`zip-slip`) limitek.
+- **Build:** hálózat-izolált sandboxban, **ambient credential nélkül**; a dependency-k **lockfile +
+  provenance/signature** szerint rögzítve (nem csak „hash-elve"); install-scriptek tiltva.
+
+**Published-CSP (a §4.3 csonk kiegészítve):** `default-src 'none'`; `script-src` **csak** a hash-elt
+bundle-namespace; **`connect-src` allowlist** (enélkül egy kompromittált bundle korlátlanul
+exfiltrál — a legfontosabb futásidejű fék); `style-src`/`img-src`/`font-src` szűkítve;
+`object-src 'none'`; `base-uri 'none'`; `form-action` allowlist; `frame-ancestors` szűkítve. Plusz a
+media-originen **`X-Content-Type-Options: nosniff` + kényszerített `Content-Type`** — enélkül a
+„nem-futtatható media-origin" védelem összeomlik (sniffelt script).
+
+**postMessage-csatorna** (Edit/Preview iframe ↔ CMS-host, a `cms:*` üzenetek): a host-listener
+**szigorú `event.origin` allowlist**-et ellenőriz; a host→iframe post **célzott originre** megy
+(sosem `*`); a parancsoknak **validált sémája** van. A `sandbox` token-halmaz explicit — Edit:
+`allow-scripts` a first-party edit-runtime-hoz, `allow-same-origin` **nélkül** a külön originen,
+top-nav és külső form-submit tiltva; Preview: read-only. Az izolációs origin **külön regisztrálható
+domain** (nem csak aldomain — az eTLD+1 megosztása gyengébb izoláció).
+
+### 16.4 v1 concurrency — revision-guard a néma lost-update ellen (P0.5 részleges előrehozás)
+
+A §15.7 pesszimista edit-lock re-entráns a saját usernek (hogy „az AI a user nevében" ne zárja ki
+magát), de v1-ben nincs revision → ember-A-fül + AI-B-fül (§14.7 „fordíts minden mezőt")
+felülírhatják egymást, ami cáfolja a §13 „nincs néma vesztés"-t. Feloldás a *teljes* optimistic
+concurrency nélkül:
+
+- **Könnyű revision-guard már v1-ben:** minden írás hordozza a bázis-revíziót; a stale írás
+  (force-unlock, TTL-lejárat, vagy ugyanazon user két írási útja) **elutasítva**, nem
+  last-write-wins. Ez nem a teljes merge-UI (az marad a B fázisban), csak a néma vesztés lezárása.
+- **AI-írások:** minden AI-írás (nem csak a fordítás) **review-stagingbe** megy; bulk-műveletnél
+  megerősítés; token/ráta/rekurzió limit a read→write→re-read hurokra; az audit-log
+  **megkülönbözteti** az AI- és ember-írást a közös re-entráns lock alatt is.
+- **Admin force-unlock:** **fencing-token**, hogy a lejárt lock késői írása ne érvényesüljön.
+
+### 16.5 Store — a §15.5 #5 ⟂ §15.7 szóhasználat feloldva
+
+- **„Első *produkciós* implementáció" = Postgres + object storage** (§15.5 #5). A **spike** Mongón
+  fut (§15.7) — de ez explicit egy **logika-prototípus**, aminek a konzisztencia-rétege NEM a
+  produkciós.
+- A spike revision/publish-pointer sémája **szándékosan vékony, repository-interface mögött**, hogy a
+  Mongo→Postgres csere konténerezve legyen; a referenciális integritás a spike-ban app-szintű, a
+  pilotnál DB-szintű. A P0.2 séma mindkét store előtt landol.
+- Nyílt kockázat rögzítve: egy zöld Mongo-spike **NEM** validálja a produkciós store atomicitását
+  (több-táblás tranzakció) — ezt a pilot méri.
+
+### 16.6 Szekvenálás — a kereslet-kapu a technikai spike ELŐTT
+
+A §12.5 és a §15.6 maga mondja: a kereslet a legfontosabb, kód előtt validálandó. A technikai
+megvalósíthatóság („tipizált tartalom → statikus HTML") nem a nagy ismeretlen; a **kereslet +
+szubsztitúció** (megtörik-e egy off-the-shelf editor a bespoke GSAP-on) az. Ezért a §15.3/A **elé**:
+
+1. **Kereslet-kapu (concierge / Wizard-of-Oz, nulla platform-eng).** 2-3 valódi HU ügyfélnek
+   szállítsd a client-safe editálást *kizárólag meglévő eszközzel* (pl. Storyblok Visual Editor vagy
+   „szerkeszd az N mezőt" űrlap egy bespoke buildre), **valódi áron.** Mérd (műszerezve, nem
+   kérdezve): (a) megveszik-e az áron; (b) tényleg szerkesztik-e, és milyen gyakran; (c) tényleg
+   megtört-e az off-the-shelf a GSAP-on úgy, hogy egyedi architektúra kellett; (d) maradnak-e, vagy
+   elcsúsznak Shopify/Webflow/semmi felé. **Go-küszöb:** ≥N elkötelezett, fizető ügyfél, ahol egy
+   off-the-shelf editor *bizonyíthatóan* elbukott a bespoke motionon (ez a §15.6 „Product go").
+2. **Szűkített technikai spike (csak ha az 1. zöld).** A valódi ismeretlen: a bespoke GSAP
+   `mount/refresh/destroy` túléli-e a tipizált editet + hosszabb szöveget egy *valódi*
+   referencia-oldalon, **locale × viewport × font** mátrixszal (§14.5). Ne front-loadold a
+   migráció-motort / atomi-publisht / security-render-pipeline-t, amíg az 1. kapu nem bizonyít.
+3. **Value-prop őszinteség.** A §14.5 reflow-mérséklés **szűkíti** a differenciátort: a „biztonságos"
+   animáció-halmaz átfed a Webflow/Framer natív készletével. A megmaradó egyedi érték a *bespoke
+   motion megőrzése egy meglévő, kézzel épített oldalon* + a fejlesztő-birtokolta struktúra — ezt kell
+   az 1. kapunak **igazolnia**, nem feltételezni.
+
+### 16.7 Frissített készültségi értékelés
+
+| Tengely | 1. kör (§15) | 2. kör (§16 után) |
+|---|---|---|
+| Belső konzisztencia (kanonikus séma) | ~4/10 | a §16.1 után **lekódolható** |
+| Reconciliation teljesség | ~4/10 | a §16.2 után **specifikált** |
+| Biztonsági modell | ~5/10 | a §16.3 után a **spike-ra elég**; multi-tenant a pilotnál |
+| v1 concurrency (néma vesztés) | ~4/10 | a §16.4 revision-guard **lezárja** |
+| Szekvenálás / kereslet | ~3/10 | a §16.6 **megfordítja** a sorrendet |
+
+**Nettó:** a koncepció kiállta a második, adverzariális kört; a §15 P0-kapuk állnak. A három
+KRITIKUS blokkoló (kanonikus séma, reconciliation, sink-lista) itt **doc-szinten feloldva** — a
+fixed-only spike adat/render-rétege ezután **lekódolható**. A megmaradó feltétel **stratégiai**: a
+kereslet-kaput (§16.6) a technikai spike **előtt** kell futtatni.
