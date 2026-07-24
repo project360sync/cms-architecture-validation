@@ -8,7 +8,8 @@ content) to be **validated before implementation**.
   annotation convention, the content/schema data model, the pipelines
   (onboarding import → render/merge → static export → reconciled re-ingest),
   the editor model, JS/animation handling, storage, a robustness/fragility
-  analysis, prior-art mapping (Shopify OS 2.0, Instatic), and an **i18n extension.**
+  analysis, prior-art mapping (Shopify OS 2.0, Instatic), an **i18n extension**,
+  and an independent **conditional validation verdict** with implementation gates.
 
 ## Where to focus when validating
 
@@ -22,6 +23,8 @@ content) to be **validated before implementation**.
   content, fallback + staleness, AI-translation), and **§14.5 reflow-safe
   animation** — the resolution to the reflow limit: animate length-tolerant
   sections, keep motion restrained, put `maxLength` hints on length-sensitive slots.
+- **§15 — independent review** — conditional validation, P0/P1 implementation gates,
+  and the smallest vertical pilot that can prove or disprove the proposal.
 
 The document is self-contained: a reviewer (human or AI) can read it cold,
 without the originating conversation.

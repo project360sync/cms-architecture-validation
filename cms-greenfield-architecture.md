@@ -80,8 +80,11 @@ A fejlesztő normál oldalt ír, csak **megjelöli**, mi szerkeszthető. Alap: *
 csak a jelölt részek nyílnak meg.
 
 ```html
-<!-- Egy szekció-példány, típussal (a séma ehhez köt) -->
-<section class="hero" data-cms-section="hero" data-gsap="hero-intro">
+<!-- Egy szekció-példány: stabil példány-id + séma-típus -->
+<section class="hero"
+         data-cms-section-id="hero-1"
+         data-cms-section-type="hero"
+         data-gsap="hero-intro">
   <h1 class="hero__title">
     <span data-cms-field="line1">FÉM.</span>       <!-- SLOT: nevesített, tipizált -->
     <span data-cms-field="line2">ÜVEG.</span>
@@ -91,7 +94,7 @@ csak a jelölt részek nyílnak meg.
 </section>
 
 <!-- Kollekció: a kliens elemet vehet fel / szerkeszthet / rendezhet át -->
-<section data-cms-section="products">
+<section data-cms-section-id="products-1" data-cms-section-type="products">
   <div class="pgrid" data-cms-collection="items">
     <template data-cms-item>                        <!-- a fejlesztő ITEM-SABLONJA -->
       <a class="pitem">
@@ -107,7 +110,11 @@ csak a jelölt részek nyílnak meg.
 ```
 
 Attribútumok:
-- `data-cms-section="<type>"` — szekció-példány; a `<type>` egy **séma-kulcs** (3.4).
+- `data-cms-section-id="<id>"` — stabil, oldalon belül egyedi **példányazonosító**; a
+  tartalom-doc `template.sections` kulcsával egyezik. Re-ingesztnél nem generálható
+  dokumentum-pozícióból.
+- `data-cms-section-type="<type>"` — a példány **séma-kulcsa** (3.4). Ugyanabból a
+  típusból több példány is lehet, ezért a típus önmagában nem használható render-célpontként.
 - `data-cms-field="<name>"` — nevesített tartalom-slot; a típusa a sémából jön (vagy
   elemből infered: `<img>` → image, egyébként text).
 - `data-cms-collection="<name>"` — ismétlődő régió; benne egy `<template data-cms-item>`
@@ -194,12 +201,12 @@ címkével, alapértékkel, validációval. Ez adja a gazdag editor-UI-t + a val
 ### 4.1 Onboarding-import (egyszer, HTML → template + tartalom)
 
 Az ingeszt **onboarding-lépés, nem folyamatos overlay**. A tetszőleges HTML-ből előáll:
-(a) az **annotált template** (a struktúra, JS-bundle SRI-pinnelve), és (b) a **kezdeti
+(a) az **annotált template** (a struktúra, content-addressed JS-bundle), és (b) a **kezdeti
 tartalom-doc** (a slotokból kiolvasott értékek). Innentől a **tartalom-store az igazság**.
 
 ```text
 importSite(html, assets, js):
-  1. sanitize (inline <script>/on* ki; külső <script src> megtartva, SRI)
+  1. sanitize (inline <script>/on* ki; engedélyezett dependency-k vendorizálva és hash-elve)
   2. a data-cms-* markerekből kiolvassa a slotokat/kollekciókat/szekciókat
   3. template  := struktúra (slotok üres/prototípus formában) + CSS + JS-bundle
   4. content   := a jelenlegi értékek kiolvasva a slotokból (fields + collections)
@@ -217,9 +224,11 @@ function render(template, content): Html {
   return $.html()
 }
 function hydrate($, secId, sec, collections) {
-  const root = $(`[data-cms-section="${sec.type}"]`)     // (vagy szekció-példány-id)
+  const root = $(`[data-cms-section-id="${cssEscape(secId)}"]`)
+  assert(root.length === 1)
+  assert(root.attr("data-cms-section-type") === sec.type)
   for (const [name, val] of Object.entries(sec.settings ?? {}))
-    setContent(root.find(`[data-cms-field="${name}"]`), val)   // adat → slot
+    setTypedContent(root, name, val, schemaFor(sec.type, name))
   if (sec.collection) {                                        // kollekció-render
     const box = root.find("[data-cms-collection]")
     const proto = box.find("[data-cms-item]")
@@ -229,11 +238,18 @@ function hydrate($, secId, sec, collections) {
 }
 ```
 
+A `setTypedContent` **kontextus szerint kódol és validál**: a sima szöveg csak
+`textContent`, a rich text egy szűk allowlisten megy át, URL/image mezőnél protokoll- és
+origin-policy érvényesül, attribútumérték sosem kerül nyers string-interpolációval a HTML-be.
+Ez a védelem minden editor-, AI-, import- és API-írásnál kötelező; az onboarding
+`sanitize` önmagában nem védi a később módosított tartalmat.
+
 ### 4.3 Publish / export (ADR-002)
 
 A publish **immutable statikus snapshotot** renderel és az **edge-re** exportál (a kliens
 saját domainje). A szerkesztő CMS **scale-to-zero**, nincs a látogató útján. A snapshot
-tartalmazza a HTML-t + asseteket + a szerző-JS-bundle-t (SRI, CSP `script-src 'self'`).
+tartalmazza a HTML-t + content-addressed asseteket + a szerző-JS-bundle-t
+(immutable deploy manifest, CSP `script-src 'self'`).
 
 ### 4.4 Struktúra-frissítés (re-ingeszt, névre reconciliálva)
 
@@ -250,7 +266,11 @@ reingest(newHtml):
 ```
 
 **Nincs id-drift, nincs vak felülírás.** A slot átnevezése/törlése = kontrollált, jelzett
-migráció (nem néma adatvesztés).
+migráció (nem néma adatvesztés). A név-egyeztetés csak az automatikus alapértelmezés:
+produkciós séma-váltásnál verziózott, tesztelhető migrációs manifest kell
+(`rename`, `transform`, `split`, `merge`, `delete→quarantine`). A re-ingeszt
+tranzakciósan készít preview-verziót, és csak teljes schema/render/asset validáció után
+aktiválható; rollbackhez az előző template + content verzió együtt marad meg.
 
 ---
 
@@ -273,8 +293,11 @@ migráció (nem néma adatvesztés).
 
 ## 6. JS / animáció kezelése
 
-- A szerző-JS (GSAP, ScrollTrigger, Lenis) **zárolt, verziózott bundle**, a **template**
-  része (nem „megőrzött tetszőleges ingesztált blob"). Publikálva SRI-pinnelt, CSP `self`.
+- A szerző-JS (GSAP, ScrollTrigger, Lenis) **zárolt, verziózott, content-addressed
+  bundle**, a **template** része (nem „megőrzött tetszőleges ingesztált blob").
+  Publikálva saját originről, hash-elt fájlnévvel és szűk CSP `script-src 'self'` policyval.
+  Az SRI csak külső erőforrásnál ad külön bizalmi határt; saját originű bundle
+  verziórögzítésére a content hash + immutable deploy manifest az elsődleges.
 - A JS a **renderelt strukturán** fut. Mivel a tartalom csak érték a fix DOM-ban, az
   animáció változatlan marad a tartalom-szerkesztéskor.
 - **Nyitott kockázat (validálandó):** ha a kliens **szekciót vesz fel / átrendez**, a GSAP
@@ -325,9 +348,10 @@ nested-kollekció col-id duplázás) **a pozíció-horgonyzásból** fakadnak. A
 | **különbség** | Liquid nyelv kell | benne építesz (builder) |
 | **a mi rése** | annotált HTML (nyelv nélkül) + bespoke JS megőrzés | ingeszt-overlay + JS megőrzés |
 
-**A Shopify a bizonyíték:** theme-verzió-frissítés a merchant konfigját nem törli
-(id-egyeztetés) → a név-kulcsolt „struktúra-frissítés túléli a tartalmat" modell
-**globális skálán bizonyítottan működik.**
+**A Shopify erős prior art, nem teljes bizonyíték:** megmutatja, hogy a template-től
+külön tárolt, stabil kulcsú merchant-konfiguráció nagy skálán működőképes. Nem bizonyítja
+automatikusan az annotált tetszőleges HTML importját, a bespoke JS életciklusát vagy a
+séma-migráció biztonságát; ezeket külön prototípussal kell validálni.
 
 ---
 
@@ -342,7 +366,8 @@ nested-kollekció col-id duplázás) **a pozíció-horgonyzásból** fakadnak. A
 | globális safe-mode | per-szekció séma + `editable` policy |
 | addItem = DOM-klón + id-remint | addItem = sor + újrarender |
 
-**Hordozható a jelenlegiből:** a client-safe koncepció, a JS-hibrid (Edit/Preview + SRI),
+**Hordozható a jelenlegiből:** a client-safe koncepció, a JS-hibrid (Edit/Preview +
+verziórögzítés),
 az AI-szerkesztés, a kollekció-koncepció. **Cserélendő mag:** a horgonyzás + tárolás
 (pozíció+overlay → név+típus). Migráció: az első ingeszt konvertálja a meglévő skeletont
 + override-okat névre kulcsolt tartalommá (egyszeri transzformáció).
@@ -367,6 +392,11 @@ az AI-szerkesztés, a kollekció-koncepció. **Cserélendő mag:** a horgonyzás
    ciklus a strukturában) esik ki, és az fáj-e valós oldalaknál?
 8. **Média/asset:** a kollekció-elem képe hogyan kötődik (asset-id) és hogyan élnek túl
    a re-ingesztet? Van-e árva-asset / GC szempont?
+9. **Bizalmi határok:** ki jogosult template/JS feltöltésre, hogyan izoláljuk az importot
+   (SSRF, zip-slip, aktív SVG/HTML, dependency supply chain), és hogyan kódoljuk a
+   későbbi editor-/AI-tartalmat minden render-kontextusban?
+10. **Verziózás/publish:** mi történik párhuzamos szerkesztés, autosave, séma-migráció
+    közbeni edit és részben sikertelen multi-locale publish esetén? Mi az atomi egység?
 
 ---
 
@@ -569,3 +599,66 @@ Enyhén **Postgres+JSONB** felé húz (relációs status-query: „az összes st
 2. **Reflow-biztos animáció** mennyire korlátozza a bespoke dizájnt a gyakorlatban? Elfogadható-e a
    „kevesebb, hossz-toleráns animáció" megkötés az ügyfélnek/ügynökségnek?
 3. **URL-stratégia** (prefix vs domain) a meglévő ügyfél-domainekkel — és a `hreflang`/sitemap-generálás.
+
+---
+
+## 15. Független architektúra-review — döntés és kapuk
+
+**Döntés: feltételesen valid.** A két-rétegű, névvel és típussal kötött modell jó alap a
+§12.1-ben leírt szűk célpiacra. Implementáció azonban csak az alábbi P0 kapuk
+lezárása után induljon. A jelenlegi dokumentum termék-tézisként elég erős, de még nem
+végrehajtható biztonsági és adatkonzisztencia-specifikáció.
+
+### 15.1 P0 — implementáció előtti blokkolók
+
+1. **Kanonikus identitás és séma.** Egyetlen normatív content-formátum legyen. A §3
+   `sections[id].settings` modellje és a §14 locale-szintű lapos `fields` példája jelenleg
+   két eltérő alak. Válasszunk egyet, adjunk hozzá JSON Schema-t, és írjuk le:
+   `site/page/locale/section-instance/block/field` identitását, egyediségét és
+   referenciális integritását.
+2. **Biztonságos render-szerződés.** Mezőtípusonként rögzíteni kell a sinket és policyt:
+   text→`textContent`; richtext→allowlist sanitizer; URL→engedett protokollok;
+   image→asset-id, szerveroldali MIME/decode ellenőrzés; SVG→sanitize vagy rasterize.
+   A template/JS import külön, megbízható fejlesztői jogosultság legyen, izolált
+   fetch/unpack folyamattal (SSRF, redirect, méret, zip-slip és aktív tartalom védelem).
+3. **Migrációs protokoll.** Stabil példány-id, explicit rename/transform manifest,
+   dry-run diff, quarantine, preview, atomi aktiválás és rollback nélkül a
+   „tartalom túléli a redesign-t" fő ígéret nincs bizonyítva.
+4. **Draft/publish konzisztencia.** Optimistic concurrency (`revision`/ETag), audit log,
+   draft és published revision, valamint site+locale snapshot szintű atomi publish kell.
+   A statikus fájlokat staging prefixre kell írni, majd egy manifest/pointer váltással
+   aktiválni; részleges export nem kerülhet élőbe.
+5. **Futtatási izoláció és életciklus.** Az author bundle teljes jogú kód. Az editor
+   preview ne a CMS saját originen fusson, hanem sandboxolt, külön originen. Definiálni
+   kell a bundle hookjait (`mount`, `refresh`, `destroy`), mert az újrarender,
+   locale-váltás és preview-navigáció különben listener/ScrollTrigger szivárgást okoz.
+
+### 15.2 P1 — az első pilot előtt
+
+- **Asset-életciklus:** immutable asset-id, variánsok, alt/crop/focal-point metadata,
+  referencia-számlálás, soft delete és késleltetett GC.
+- **Feltételek templating nyelv nélkül:** deklaratív `visibleWhen`, limitált listák és
+  opcionális mezők szükségesek; különben a renderelőbe ad hoc templating nyelv nő.
+- **Validációs sorrend:** schema → keresztmező/keresztreferencia → render → HTML/a11y/SEO
+  lint → asset resolve → bundle smoke test. Hiba esetén publish fail-closed.
+- **Operáció:** tenant kvóták, export idempotencia, observability, backup/restore,
+  retention és törlési politika.
+- **Hozzáférés:** legalább developer/editor/publisher szerepek; AI ugyanazt a
+  jogosultság- és validációs parancsréteget használja, mint a kézi editor.
+
+### 15.3 Minimális bizonyító spike
+
+Az architektúrát egy vertikális pilot döntse el, nem további általános tervezés:
+
+1. két azonos típusú szekciópéldány + rendezhető kollekció;
+2. HU/EN tartalom fallbackkel és stale-jelzéssel;
+3. v1→v2 migráció mező-átnevezéssel, split-tel és törölt szekció quarantine-nal;
+4. rosszindulatú richtext/URL/SVG tesztek;
+5. párhuzamos edit + publish konfliktus és rollback;
+6. GSAP `mount/refresh/destroy` lifecycle locale-váltás és hosszabb szöveg mellett.
+
+**Go feltétel:** a pilot bizonyítja, hogy nincs tartalomvesztés, nincs aktív tartalom-
+injektálás, a publish atomi/rollbackelhető, és a támogatott animáció hosszabb locale
+mellett is determinisztikusan újrainicializálható. **No-go/pivot:** ha ehhez általános
+template-runtime vagy tartalom-gráf épül, a §12 szerinti headless CMS + SSG irány
+valószínűleg olcsóbb és a felhasználó érdekét jobban szolgálja.
