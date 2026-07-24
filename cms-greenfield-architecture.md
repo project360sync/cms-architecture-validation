@@ -120,8 +120,9 @@ Attribútumok:
   elemből infered: `<img>` → image, egyébként text).
 - `data-cms-collection="<name>"` — ismétlődő régió; benne egy `<template data-cms-item>`
   prototípus (a fejlesztő egy elemet ír meg); minden elem = egy tipizált **sor**.
-- `data-cms-editable="locked|content|collection"` — per-blokk policy (opcionális; a jelölt
-  mezők/kollekciók amúgy is definiálják a szerkeszthetőséget).
+- `data-cms-editable="locked|content|collection"` — opcionális, durva authoring-hint.
+  Nem ez a jogosultság forrása: a normatív, granularis permission/capability policy a
+  verziózott section-manifestben él (§3.4).
 
 Ez a forma egy **fix példányt** ír le. Ha a kliens új szekciópéldányt is felvehet, ahhoz
 nem elég egy már DOM-ba helyezett példány: kell egy típusonkénti, inert
@@ -180,15 +181,29 @@ címkével, alapértékkel, validációval. Ez adja a gazdag editor-UI-t + a val
     { "id": "line2", "type": "text",     "label": "2. sor",  "max": 12 },
     { "id": "sub",   "type": "richtext", "label": "Alcím" }
   ],
-  "editable": "content",          // content | locked | collection
-  "insertable": false             // felveheti-e a kliens új példányként?
+  "permissions": {
+    "editContent": true,
+    "addItems": false,
+    "reorderItems": false,
+    "moveSection": false,
+    "removeSection": false,
+    "duplicateSection": false,
+    "editStructure": false
+  },
+  "capabilities": {
+    "reorderSafe": false,
+    "removalSafe": false,
+    "duplicationSafe": false,
+    "reflowSafe": false
+  },
+  "allowNewInstances": false
 }
 ```
 
 ```jsonc
 // sections/products.schema.json — kollekció-szekció
 {
-  "type": "products", "label": "Termékek", "editable": "collection",
+  "type": "products", "label": "Termékek",
   "item": {                        // az item-sablon mezői
     "fields": [
       { "id": "img",   "type": "image",    "label": "Kép", "altRequired": true },
@@ -196,12 +211,49 @@ címkével, alapértékkel, validációval. Ez adja a gazdag editor-UI-t + a val
       { "id": "desc",  "type": "longtext", "label": "Leírás" }
     ]
   },
-  "insertable": true               // a kliens vehet fel új terméket
+  "permissions": {
+    "editContent": true,
+    "addItems": true,
+    "reorderItems": true,
+    "moveSection": true,
+    "removeSection": true,
+    "duplicateSection": true,
+    "editStructure": false
+  },
+  "capabilities": {
+    "reorderSafe": true,
+    "removalSafe": true,
+    "duplicationSafe": true,
+    "reflowSafe": true
+  },
+  "allowNewInstances": true
 }
 ```
 
 **Mező-típusok** (kezdő halmaz): `text`, `longtext`, `richtext`, `image`, `url`, `select`,
 `color`, `number`, `boolean`. Mindegyikhez validáció (max hossz, enum, kötelező).
+
+#### 3.4.1 Permission és capability nem ugyanaz
+
+- A **permission** azt mondja meg, mit ajánl fel az editor az adott szerepkörnek.
+- A **capability** fejlesztői állítás arról, hogy a section implementációja mely
+  kompozíciós/reflow műveleteket viseli el; ezt automata és vizuális teszt igazolja.
+- A permission sosem lehet tágabb a capabilitynél. A manifest fordítása hibával leáll,
+  ha például `moveSection: true`, de `reorderSafe: false`.
+- `fixed` template-módban a `moveSection`, `removeSection`, `duplicateSection` és
+  `allowNewInstances` mindig `false`, a section saját deklarációjától függetlenül.
+- A kliens/AI nem írhat capabilityt. Azt csak template-verziót publikáló developer
+  változtathatja meg, új teszteredménnyel.
+
+Ez három gyakorlati lockot eredményez, amelyek egymástól függetlenek:
+
+- **content lock:** `editContent: false`;
+- **position lock:** `moveSection/removeSection/duplicateSection: false`;
+- **structure lock:** `editStructure: false` (ebben a CMS-ben ez az alapértelmezés).
+
+Egy pozíció-lockolt hero tartalma tehát továbbra is szerkeszthető lehet. Egy lockolt
+sectionön belüli kollekció elemei is lehetnek hozzáadhatók és rendezhetők, miközben maga
+a section nem mozdítható.
 
 ---
 
@@ -307,14 +359,17 @@ aktiválható; rollbackhez az előző template + content verzió együtt marad m
 
 ## 5. Editor-modell (client-safe)
 
-- **Szerkeszthetőségi szintek** (per szekció/blokk, a sémából): `locked` (dev-only, nem is
-  jelölhető ki), `content` (a mezői szerkeszthetők), `collection` (elem-felvétel/rendezés).
+- **Granularis szerkeszthetőség** (per section/blokk, a manifestből): külön content-,
+  item- és kompozíciós permissionök. Az editor nem egyetlen `locked` flagből következtet.
+  A tiltott műveletet nem ajánlja fel, és az API ugyanazt szerveroldalon is elutasítja.
+  A UI megmutathatja a lock okát (például „a hero animáció miatt nem mozgatható").
 - **Hibrid szerkesztő:**
   - **Inline click-to-edit** a szöveg/kép slotokra (a valódi oldalon kattint).
   - **Settings-panel** a tipizált mezőkre, amiknek nincs inline reprezentációja
     (`select`, `color`, `url`, `boolean`) — Shopify-módra, élő previewvel.
-- **Beszúrható paletta:** a `insertable: true` szekciók/blokkok, amiket a kliens felvehet;
-  a többi (hero-animáció, SVG) a fejlesztőé.
+- **Beszúrható paletta:** a `allowNewInstances: true` sectionök/blokkok, amiket a kliens
+  felvehet; a többi (hero-animáció, SVG) a fejlesztőé. Ez csak `composable` módban
+  érvényes, és nem írja felül a szerepkör szerinti jogosultságot.
 - **AI-chat:** ugyanazon tipizált műveleteket adja ki (mező-írás, kollekció-elem hozzáadás),
   Guardian-validációval — a kliens sosem ad meg markupot.
 - **Edit vs Preview mód:** Edit módban a szerző-JS **strippelve** (stabil szerkesztés),
@@ -335,6 +390,11 @@ aktiválható; rollbackhez az előző template + content verzió együtt marad m
   (ami néha fix szelektorokra/pin-pozíciókra épít) **eltörhet**. Ezért bespoke oldalon a
   szekció-add/reorder alapból **tiltott** (csak mező + kollekció szerkesztés) — a GSAP DOM-ja
   stabil. Rugalmas oldalon a fejlesztőnek „dinamika-biztos" szekciókat kell írnia.
+- A kompozíciós permission csak deklarált és tesztelt capabilityből következhet:
+  `moveSection→reorderSafe`, `removeSection→removalSafe`,
+  `duplicateSection→duplicationSafe`. Átrendezéskor a runtime sorrendje:
+  `destroy → DOM-művelet → mount → asset/font ready → refresh`. Globális indexre,
+  testvér-sorrendre vagy fix scroll-távra épülő section alapból pozíció-lockolt.
 
 ---
 
@@ -712,7 +772,10 @@ Az architektúrát egy vertikális pilot döntse el, nem további általános te
 5. párhuzamos edit + publish konfliktus és rollback;
 6. GSAP `mount/refresh/destroy` lifecycle locale-váltás és hosszabb szöveg mellett;
 7. fix és kompozíciós render ugyanabból a kanonikus content-sémából, két azonos típusú
-   szekcióval és add/reorder művelettel.
+   szekcióval és add/reorder művelettel;
+8. vegyes lock-policy: pozíció-lockolt, de tartalmilag szerkeszthető hero; mozgatható
+   kártyasection; lockolt sectionön belül rendezhető itemek; tiltott API-parancsok
+   szerveroldali elutasítása.
 
 **Go feltétel:** a pilot bizonyítja, hogy nincs tartalomvesztés, nincs aktív tartalom-
 injektálás, a publish atomi/rollbackelhető, és a támogatott animáció hosszabb locale
