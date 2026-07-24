@@ -77,3 +77,13 @@ Trigger: external review — the D5 conformance fix changed the doc after the ro
 fixes [prompt-collection PR #6]; R3 onward records them. R2→R3 changed sections:
 §10/§11 (D5 confirm-by date), §11 (tech-spec pointer demand-first clarification),
 evidence-cms.md (permalinks). Scorer artifacts: scores-round3/, persisted verbatim.)
+
+### Round 3 results
+| Metric | Effective | Schema |
+|---|---|---|
+| EG / C / IC / A | 9 / 9 / 9 / 9 | per-metric quote+pointer, ≥3 findings each |
+| F / H / MQ | 9 / 9 / 9 | per-metric quote+pointer, ≥3 findings each |
+
+Conformance: PASS (0 defects, 2 NOTEs, no SPEC-AMBIGUITY). Artifacts: scores-round3/ (persisted verbatim).
+Follow-ups carried (non-blocking, missing-for-10): §4 tier-pairing synthesis labeled; interim perf/a11y targets; §7 Gate-A-label full conjunction; capacity-model resolve-by row; A4 hard cutoff; guardrail single breach condition ("tartós" duration).
+Run status: `verification pending` (unchanged — load-bearing A1/A3/A5 open until Gate A/B). Phase-6 audit: pending, report to follow as audit-round3.md.
