@@ -1,7 +1,7 @@
 # Run manifest — CMS PRD (new-project-docs skill)
 - Date: 2026-07-24
 - Document: docs/prd.md in project360sync/cms-architecture-validation
-- Kit templates source commit: 9257a9b29c9192ccecf42054577145d4cace226f (== reviewed anchor; all 5 blob SHAs match rubrics.md Compatibility manifest — verified via gh api contents listing)
+- Kit templates source commit: 9257a9b29c9192ccecf42054577145d4cace226f (the fetched `main` HEAD; all 5 blob SHAs verified equal to the rubrics.md Compatibility baseline manifest via gh api contents listing — CORRECTION per audit-round3 Finding 2: this is NOT the reviewed anchor commit, which is `8e6b3f9e83de15d966d0423199918b5d3304ff24`; proceeding was lawful because the blobs matched the baseline)
   - new-project/README.md d26fe5c3a3b31b9a732d715424af311c5fda9048
   - new-project/prd-template.md b03b3d0acd24dff1e5aa38e5e4119b0d8a58de45
   - new-project/tech-spec-template.md 5a12558c8a828463bd8ee94a70e24caf9d3e3f77

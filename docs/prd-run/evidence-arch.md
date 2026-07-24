@@ -1,5 +1,10 @@
 # Evidence inventory — cms-greenfield-architecture.md (§0–§16)
-Source: /Users/jarvis/.claude/jobs/c0334220/tmp/cms-architecture-validation/cms-greenfield-architecture.md (repo main @ 9575ab8, Hungarian)
+Source (pinned, reproducible):
+- Repo: https://github.com/project360sync/cms-architecture-validation — file `cms-greenfield-architecture.md`
+  at commit **`9575ab82ad0c9e35f759f51aef8b823a7e76fd7e`** (clean tree at inventory time; file unchanged since).
+  Every `[ARCH §n]` pointer resolves within
+  `https://github.com/project360sync/cms-architecture-validation/blob/9575ab82ad0c9e35f759f51aef8b823a7e76fd7e/cms-greenfield-architecture.md`
+  at the named § heading. Language: Hungarian.
 
 [ARCH §0] Thesis: two cleanly separated layers — STRUCTURE (developer-owned annotated HTML/CSS + locked versioned GSAP JS bundle) and CONTENT (client-owned named, typed fields + collections); render merges them and JS runs on the rendered structure.
 [ARCH §0] Content is bound to a NAME, not an HTML position, so restructuring the template does not destroy client content.

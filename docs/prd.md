@@ -1,7 +1,7 @@
 # Client-safe CMS — PRD
 
 **One-liner:** Ügynökség-üzemeltetett CMS bespoke, GSAP-animált, jellemzően statikus márkaoldalakhoz — fejlesztő birtokolja a struktúrát és a bezárt animáció-bundle-t, az ügyfél biztonságosan szerkeszti a szöveget, képet és gyűjtemény-elemeket; statikus publikálás az ügyfél saját domainjére.
-**Owner:** László (project360sync) · **Status:** draft · **Updated:** 2026-07-24
+**Owner:** László (project360sync) · **Status:** draft — QC: minden metrika 9/10 + conformance PASS; run: `verification pending` a Gate A/B zárásáig (ld. [prd-run/run-manifest.md](prd-run/run-manifest.md)) · **Updated:** 2026-07-24
 
 ---
 

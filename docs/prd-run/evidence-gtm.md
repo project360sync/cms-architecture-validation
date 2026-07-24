@@ -1,5 +1,10 @@
 # Evidence inventory — go-to-market.md
-Source: /Users/jarvis/.claude/jobs/c0334220/tmp/cms-architecture-validation/go-to-market.md (repo main @ 9575ab8, Hungarian). FX assumption ≈400 HUF/USD.
+Source (pinned, reproducible):
+- Repo: https://github.com/project360sync/cms-architecture-validation — file `go-to-market.md`
+  at commit **`9575ab82ad0c9e35f759f51aef8b823a7e76fd7e`** (clean tree at inventory time; file unchanged since).
+  Every `[GTM §…]` pointer resolves within
+  `https://github.com/project360sync/cms-architecture-validation/blob/9575ab82ad0c9e35f759f51aef8b823a7e76fd7e/go-to-market.md`
+  at the named § heading. Language: Hungarian. FX assumption ≈400 HUF/USD.
 
 [GTM §Header] Model: agency operates the CMS as internal tool; end-client buys a service (build + operation) and gets CMS access for self-editing. Status: proposal, for validation.
 [GTM §1] Product: bespoke, animated (GSAP), mostly-static sites for SMB clients; one internal CMS instance serves N client sites → near-minimal per-site cost.
