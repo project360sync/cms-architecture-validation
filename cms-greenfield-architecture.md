@@ -372,8 +372,13 @@ aktiválható; rollbackhez az előző template + content verzió együtt marad m
   érvényes, és nem írja felül a szerepkör szerinti jogosultságot.
 - **AI-chat:** ugyanazon tipizált műveleteket adja ki (mező-írás, kollekció-elem hozzáadás),
   Guardian-validációval — a kliens sosem ad meg markupot.
-- **Edit vs Preview mód:** Edit módban a szerző-JS **strippelve** (stabil szerkesztés),
-  Preview módban **fut** (élő animáció). (Ez már megvan a jelenlegi implementációban.)
+- **Edit vs Preview mód (izolálva):** mindkettő **külön preview-originről szolgált,
+  sandboxolt iframe**; a template sosem kerül a CMS-kezelőfelület DOM-jába.
+  - **Edit:** szerző-`<script>` strippelve; csak a first-party, megbízható edit-runtime fut;
+    a szerző iframe/form/külső-asset a secure-render (P0.3) szerint semlegesítve; sandbox-flagek
+    blokkolják a top-navigációt és a külső form-submitet.
+  - **Preview:** read-only, szerző-JS-sel (élő animáció).
+  - Indoklás és a v1 concurrency-döntés: §15.7.
 
 ---
 
@@ -761,27 +766,46 @@ végrehajtható biztonsági és adatkonzisztencia-specifikáció.
 - **Hozzáférés:** legalább developer/editor/publisher szerepek; AI ugyanazt a
   jogosultság- és validációs parancsréteget használja, mint a kézi editor.
 
-### 15.3 Minimális bizonyító spike
+### 15.3 Fázisbontás — mi kerül a spike-ba, mi utána
 
-Az architektúrát egy vertikális pilot döntse el, nem további általános tervezés:
+A review-egyeztetés alapján (lásd a PR-diszkussziót) a P0/P1 tételek **három fázisra**
+oszlanak. A mag-hipotézist a **v1 minimál spike** olcsón bizonyítja; a nehéz platform-részek
+később jönnek. A 7 P0 marad végső release-gate, de nem mind a spike előfeltétele.
 
-1. két azonos típusú szekciópéldány + rendezhető kollekció;
-2. HU/EN tartalom preview-fallbackkel, publish-policyval és stale-jelzéssel;
-3. v1→v2 migráció mező-átnevezéssel, split-tel és törölt szekció quarantine-nal;
-4. rosszindulatú richtext/URL/SVG tesztek;
-5. párhuzamos edit + publish konfliktus és rollback;
-6. GSAP `mount/refresh/destroy` lifecycle locale-váltás és hosszabb szöveg mellett;
-7. fix és kompozíciós render ugyanabból a kanonikus content-sémából, két azonos típusú
-   szekcióval és add/reorder művelettel;
-8. vegyes lock-policy: pozíció-lockolt, de tartalmilag szerkeszthető hero; mozgatható
-   kártyasection; lockolt sectionön belül rendezhető itemek; tiltott API-parancsok
-   szerveroldali elutasítása.
+**(A) v1 minimál spike — `fixed-only`, single-editor, single-locale**
+Cél: bizonyítani, hogy a tartalom túléli a redesignt, és a client-safe szerkesztés + a
+bespoke GSAP együtt működik. Ehhez **concurrency, multi-locale és composable NEM kell.**
 
-**Go feltétel:** a pilot bizonyítja, hogy nincs tartalomvesztés, nincs aktív tartalom-
-injektálás, a publish atomi/rollbackelhető, és a támogatott animáció hosszabb locale
-mellett is determinisztikusan újrainicializálható. **No-go/pivot:** ha ehhez általános
-template-runtime vagy tartalom-gráf épül, a §12 szerinti headless CMS + SSG irány
-valószínűleg olcsóbb és a felhasználó érdekét jobban szolgálja.
+1. stabil section-/field-identity + kötelező manifest (P0.1 fixed fele, P0.2);
+2. typed, kontextus-biztos render **minden** content-write után + rosszindulatú
+   richtext/URL/SVG tesztek (P0.3);
+3. minimális `rename`/`quarantine` migráció + immutable revision + rollback → a
+   „tartalom túléli a redesignt" bizonyítása (P0.4);
+4. fixed GSAP `mount/refresh/destroy` lifecycle hosszabb szöveg mellett (P0.6 fixed fele);
+5. content-edit + item-hozzáadás/rendezés a section **pozíciójának módosítása nélkül**;
+6. **atomi publish** (staging → pointer) + rollback;
+7. vegyes lock-policy `fixed` módban: pozíció-lockolt de tartalmilag szerkeszthető hero,
+   lockolt sectionön belül rendezhető itemek, tiltott API-parancsok szerveroldali elutasítása.
+
+**Go feltétel:** nincs tartalomvesztés, nincs aktív tartalom-injektálás, a publish
+atomi/rollbackelhető, és a támogatott animáció hosszabb szöveg mellett is determinisztikusan
+újrainicializálható.
+
+**(B) Production pilot előtt**
+- **Concurrency:** v1-ben **pesszimista edit-lock** (§15.7); az **optimistic concurrency +
+  lost-update** kezelés ide kerül, ha valós egyidejű több-szerkesztős használat lesz (P0.5).
+- teljes **multi-locale publish-policy** (required/fallback/hidden + atomi locale-release, P0.7);
+- **audit / RBAC** + atomi release pointer (P0.5 többi része);
+- végleges **asset-életciklus** + operációs kontrollok (P1).
+
+**(C) Fázis 2 — composable**
+- `composable` prototípus-registry + section add/remove/reorder (P0.1 composable fele);
+- `reorderSafe` / `removalSafe` / `duplicationSafe` capabilityk + a hozzájuk tartozó tesztek;
+- per-locale szekció-sorrend (§14.4).
+
+**No-go/pivot:** ha a mag-tézishez általános template-runtime vagy tartalom-gráf kell,
+a §12 szerinti headless CMS + SSG irány valószínűleg olcsóbb és a felhasználó érdekét
+jobban szolgálja.
 
 ### 15.4 A review állításainak ellenőrzési alapja
 
@@ -833,3 +857,40 @@ A technikai spike sikere **szükséges, de nem elégséges**. Két egymástól f
 Ha csak az egyik kapu teljesül, nem indul teljes platformfejlesztés: technikai kudarc
 esetén pivot headless/SSG integrációra; keresleti kudarc esetén a spike marad belső
 ügynökségi eszköz vagy leáll.
+
+### 15.7 Feloldott v1-döntések (a review-egyeztetésből)
+
+**Concurrency — v1: pesszimista edit-lock (nem optimistic).**
+
+- A **spike single-editor** → semmi concurrency nem kell hozzá.
+- **Early v1 / produkció:** oldal-szintű **pesszimista edit-lock**:
+  - **heartbeat** (~30 mp) + **TTL** (~2–5 perc lejárat, hogy a bezárt fül / lefagyás /
+    megszakadt net **ne** zároljon örökre) + **admin force-unlock** vészhelyzetre;
+  - **re-entrant a saját usernek**: második fül, és **az AI a user nevében** ír → nem zárja
+    ki magát (a kézi editor és az AI ugyanazon a tipizált command-úton);
+  - a többiek **csak-olvasható** nézet + „**X épp szerkeszti — N perce**" jelzés.
+- **Atomi publish** (staging → pointer) **külön** marad — a lock editor↔editor, nem
+  edit↔publish; migráció/re-ingeszt közben az edit blokkolva/sorolva („épp publikálunk…").
+- **Optimistic concurrency + lost-update** a *production pilot előtt* fázisba (§15.3/B) kerül —
+  akkor, ha valós egyidejű, ugyanazon oldalon dolgozó **több szerkesztő** lesz (különböző
+  részeken), offline/mobil vagy real-time collab. A célpiacon (tipikusan egy ügyfél-editor) a
+  pesszimista lock elég és **jóval egyszerűbb** (nincs revision/ETag/merge-UI).
+
+**Izoláció — Edit ÉS Preview is sandboxolt, külön originről.**
+
+Edit módban is **fejlesztői HTML/CSS/SVG** jelenik meg (iframe, form, navigáció, külső
+asset), ami **JS nélkül is kockázat** → a template **sosem** kerül a CMS-kezelőfelület
+DOM-jába:
+
+- **Edit:** külön preview-originről, sandboxolt iframe; szerző-`<script>` strippelve; csak a
+  **first-party edit-runtime** fut; a szerző iframe/form/külső-asset a P0.3 secure-render
+  szerint semlegesítve; sandbox-flagek blokkolják a top-navigációt és a külső form-submitet.
+- **Preview:** külön originről, **read-only** iframe, szerző-JS-sel.
+
+Ez pontosítja a P0.6-ot: nem elég csak a JS-es Previewt izolálni, az Edit-nézetnek is külön,
+sandboxolt originen kell futnia.
+
+**Scope-megerősítés:** v1 = `fixed-only`; `composable` = Fázis 2. **Persistence:** a spike
+maradhat a jelenlegi **Mongón**; a Postgres+JSONB greenfield-döntést (§15.5 #5) nem kell a
+mag-tézis validációjához előre megfizetni — a revision/audit/RBAC/publish-pointer relációs
+igénye a production pilotnál válik esedékessé.

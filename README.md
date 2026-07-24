@@ -23,8 +23,11 @@ content) to be **validated before implementation**.
   content, fallback + staleness, AI-translation), and **§14.5 reflow-safe
   animation** — mitigation for the reflow limit: animate length-tolerant sections,
   keep motion restrained, constrain sensitive slots, and test locale/viewport states.
-- **§15 — independent review** — conditional validation, P0/P1 implementation gates,
-  and the smallest vertical pilot that can prove or disprove the proposal.
+- **§15 — independent review** — conditional validation, P0/P1 implementation gates, and
+  the smallest vertical pilot. **§15.3** phases the work (v1 minimal spike → production
+  pilot → Phase 2 composable); **§15.7** records the resolved v1 decisions: **pessimistic
+  edit-lock** for concurrency (optimistic deferred), and **sandboxed separate-origin
+  Edit + Preview** iframes.
 
 The document is self-contained: a reviewer (human or AI) can read it cold,
 without the originating conversation.
