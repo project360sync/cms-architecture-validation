@@ -8,17 +8,20 @@ content) to be **validated before implementation**.
   annotation convention, the content/schema data model, the pipelines
   (onboarding import → render/merge → static export → reconciled re-ingest),
   the editor model, JS/animation handling, storage, a robustness/fragility
-  analysis, and prior-art mapping (Shopify OS 2.0, Instatic).
+  analysis, prior-art mapping (Shopify OS 2.0, Instatic), and an **i18n extension.**
 
 ## Where to focus when validating
 
 - **§0 — TL;DR** — the thesis in one paragraph.
 - **§11 — Open questions** — concrete technical points to stress-test.
 - **§12 — Limits & when to choose otherwise** — the honest scope: what the model
-  does NOT answer (commerce, content-graph, DIY-no-dev, design freedom, i18n),
-  the sharpest internal limit (GSAP × content-reflow), and **§12.5 the demand
-  question** — the most important, non-technical thing to validate before writing
-  any code.
+  does NOT answer, the sharpest internal limit (GSAP × content-reflow), and
+  **§12.5 the demand question** — the most important, non-technical thing to
+  validate before writing any code.
+- **§14 — i18n** — how multi-language fits as a natural extension (locale-scoped
+  content, fallback + staleness, AI-translation), and **§14.5 reflow-safe
+  animation** — the resolution to the reflow limit: animate length-tolerant
+  sections, keep motion restrained, put `maxLength` hints on length-sensitive slots.
 
 The document is self-contained: a reviewer (human or AI) can read it cold,
 without the originating conversation.

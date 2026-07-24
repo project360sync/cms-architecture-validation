@@ -392,7 +392,7 @@ alulszolgált rés — de **szűk.**
 | **Adatból generált sok oldal** (500 termékoldal egy forrásból, auto-landingek, auto-sitemap) | oldalról oldalra megy, nincs template-generálás adatból | **Astro/Next** (getStaticPaths) + tartalom-forrás |
 | **Fejlesztő NÉLKÜLI DIY-építés** (az ügyfél maga rakja össze, nincs dev) | **kell** a fejlesztő az annotált template-hez | **Webflow / Framer / Wix / Squarespace** |
 | **Kliens dizájn-szabadság** (hero-átszabás, szekciók szabad mozgatása, új egyedi blokkok) | szándékosan **zárolt struktúra** | **Webflow/Framer** vagy Shopify theme-editor |
-| **i18n / enterprise workflow** (több nyelv, jóváhagyás, ütemezés, A/B, finom szerepkörök) | a névre-kulcsolt tartalom-docnak nincs többnyelv-/workflow-story-ja | **enterprise headless** (Contentful/Sanity/AEM) |
+| **Enterprise lokalizációs workflow** (jóváhagyási lánc, ütemezés, A/B, fordító-szerepkörök) — az **i18n magját a §14 megoldja**, a nehéz ops-ot nem | a workflow-réteg hiányzik | **enterprise headless** (Contentful/Sanity/AEM) |
 | **App-szintű interaktivitás** (foglaló naptár, konfigurátor, kalkulátor, embed-app) | ez nem tartalom-edit, hanem funkció | **app-blokkok / integrációk / harmadik-fél embed** |
 
 ### 12.3 A legélesebb BELSŐ korlát: GSAP × tartalom-reflow
@@ -407,6 +407,8 @@ Vagyis: **minél bespoke-abb az animáció, annál kevésbé biztonságos a szab
 2. az ügyfél csak **nagyon szűk mezőket** szerkeszthet (kevesebb érték a kliensnek).
 
 Ez nem apró él: pont a niche középpontjában (art-directed motion) a legélesebb.
+**→ Feloldás: §14.5 (reflow-biztos animáció)** — hossz-toleráns szekciókat animálj, keveset, és
+tegyél `maxLength` hintet a hossz-érzékeny slotokra. Így a tartalom-/fordítás-változás nem töri a mozgást.
 
 ### 12.4 Mikor áll a FELHASZNÁLÓ érdekében mást választani
 
@@ -447,3 +449,123 @@ A modell akkor jó, ha egyszerre igaz:
 - A publikált oldalon a **GSAP fut**, a tartalom-szerkesztés nem töri az animációt.
 - Az `addItem` és a mező-szerkesztés **egyszerű adatművelet**, nem DOM-sebészet.
 - A modell **framework-agnosztikus** marad (annotált HTML, nem templating nyelv).
+
+---
+
+## 14. i18n — többnyelvűség (bővítmény)
+
+> A §12 az i18n-t hiányként jelölte. Ez a szekció megmutatja, hogy a modellbe
+> **természetes bővítményként** illik: mivel a tartalom már szét van választva a
+> struktúrától és **névre kulcsolt**, az i18n egy **locale-dimenzió a tartalom-rétegen**
+> — a struktúra (template + GSAP) **egyetlen forrás marad.**
+
+### 14.1 Tartalom-modell: locale-scoped, struktúra közös
+
+A template a slotokat névvel deklarálja (locale-független). A tartalom locale-onként forkol:
+
+```json
+{
+  "locales": ["hu", "en", "de"],
+  "defaultLocale": "hu",
+  "content": {
+    "hu": { "fields": { "hero.line1": "FÉM." },   "template": { "order": ["hero-1","products-1"] } },
+    "en": { "fields": { "hero.line1": "METAL." }, "template": { "order": ["hero-1","products-1"] } }
+  },
+  "collections": {
+    "termekek": [
+      { "id": "itm_7f3a",
+        "fields": { "hu": { "title": "Berg Passive" }, "en": { "title": "Berg Passive" } } }
+    ]
+  }
+}
+```
+
+A render **locale-onként egyszer** fut → `/hu/…`, `/en/…` statikus fák. **Egy struktúra, N kimenet.**
+
+### 14.2 Fallback + staleness (a valódi munka)
+
+Egy fordítás sosem „minden vagy semmi". Három állapot mezőnként: **translated / untranslated / stale.**
+
+```ts
+function resolve(field, locale, content) {
+  const v = content[locale]?.fields[field]
+  if (v?.value != null && !v.stale) return v.value      // lefordítva & friss
+  return content[content.defaultLocale].fields[field]   // fallback → SOSEM üres
+}
+// staleness: a FORRÁS (default locale) értékének hashe a fordításkor eltárolva.
+// ha a forrás később változik → a hash eltér → a fordítás `stale` → review-ra jelölve.
+translation.stale = sha1(sourceValueNow) !== translation.sourceHash
+```
+
+Így egy részleges fordítás is publikálható (a defaultra esik vissza), és amikor a magyar
+forrás változik, a német/angol verzió **stale-nek jelölődik**, nem lesz némán rossz.
+
+### 14.3 Kollekciók locale-ok közt
+
+Az elemek **stabil `id`-t** osztanak a locale-ok közt (a `7f3a` *ugyanaz* a termék),
+és csak a **mezők** locale-onkéntiek → a fordítás elemenként/mezőnként követhető.
+Locale-specifikus elem (csak DE-ben promó) = opcionális `locales: ["de"]` flag — a kivétel.
+
+### 14.4 Struktúra per-locale
+
+- **Alap: közös** — ugyanaz a template, fordított értékek. Nincs per-locale struktúra-munka.
+- **RTL (ar/he)**: fejlesztői struktúra-ügy — a render `<html lang="ar" dir="rtl">`-t ad, a
+  CSS **logikai property-ket** használ (`margin-inline`, `padding-inline-start`). Bespoke
+  GSAP + RTL tükrözött animációt igényel (plusz dev-munka).
+- **Per-locale szekció-sorrend/rejtés ingyen adódik**: a tartalom-doc `template.order`-je
+  locale-onkénti, így egy locale elrejthet/átrendezhet szekciót a template érintése nélkül.
+
+### 14.5 Reflow-biztos animáció — a §12.3 korlát FELOLDÁSA (a kulcs)
+
+A §12.3 él (fordítás → eltérő szöveghossz → törik a hangolt animáció) **nem a modell hibája,
+hanem dizájn-döntés.** A feloldás: **animálj hossz-toleráns szekciókat, keveset.**
+
+**Animáld (hossz-toleráns):**
+- **Konténer-szintű reveal** (opacity/translate a *wrapperen* — a szöveg szabadon átfolyhat belül)
+- Kép/háttér parallax, marquee, dekoratív SVG draw-in, fade-up belépő
+
+**Kerüld (hossz-érzékeny):**
+- **SplitText** sor-soronkénti reveal (sorszám-függő)
+- **ScrollTrigger pin fix scroll-távval** (tartalom-magasság-függő)
+- vízszintes **scroll-jack mért szélességgel**
+
+**Technika:**
+- animáld a **wrappert**, ne a szöveg-node-ot;
+- `ScrollTrigger.refresh()` + `invalidateOnRefresh` tartalom-/locale-váltáskor; **futásidőben mérj,
+  ne hardcode-olj** scroll-távot/szélességet;
+- **hossz-érzékeny sloton `maxLength` hint a sémában** → a fordítót figyelmezteti (és az AI-t
+  is korlátozza); `text-wrap: balance`, `min-height`, hely-fenntartás.
+
+**Séma-jelölés:** egy szekció/mező kaphat `reflowSafe: true|false`-t. A `false` (hossz-érzékeny)
+esetén: vagy a fejlesztő reflow-biztosra írja az animációt, vagy a szerkeszthető mezők
+**hossz-korlátozottak** (a kliens/AI nem írhat túl hosszút). Így az i18n **nem töri** a mozgást.
+
+**Elv:** **kevesebb, de robusztus animáció > sok törékeny.** A hero rajz-animáció + reveal-ek
++ marquee bőven elég a karakterhez; a pin scroll-jack a legkockázatosabb — azt i18n-nél hagyd
+ki, vagy tedd hossz-toleránssá.
+
+### 14.6 Routing & SEO
+
+- **URL**: locale-prefix (`/hu/`, `/en/`) — statikus exporthoz a legegyszerűbb. (Aldomain/ccTLD = több infra.)
+- A render kiadja: `<html lang>`, per-oldal **`hreflang` alternate**, per-locale `canonical`, per-locale **sitemap**.
+- **Nyelvváltó** komponens: kell egy page-id↔fordítások map (ugyanaz a page-id a locale-ok közt).
+
+### 14.7 AI-fordítás — erős funkció, ami már illik
+
+A meglévő AI-chat + tipizált mezők: *„fordítsd az összes mezőt angolra"* / *„a termék-szekciót
+németre"* → az AI a **cél-locale mezőértékeit** tölti (a struktúra érintetlen), review-ra jelölve.
+A tipizált modell tisztává teszi (adatot fordít, sosem markupot) — ez inkább **headline feature**.
+
+### 14.8 Tárolás
+
+Egy **fordítás-tábla**: `(siteId, locale, fieldKey)` → `{ value, status, sourceHash, updatedAt,
+translatedBy }`. Ez first-class-szá teszi a mezőnkénti staleness/status + review-workflow-t.
+Enyhén **Postgres+JSONB** felé húz (relációs status-query: „az összes stale angol mező").
+
+### 14.9 Amit i18n-nél is validálni kell
+
+1. **Enterprise workflow** (jóváhagyási lánc, ütemezés, fordító-szerepkörök) — az i18n *magját*
+   ez a szekció megoldja, de a **nehéz lokalizációs ops** még mindig enterprise-headless felé húz. Hol a határ?
+2. **Reflow-biztos animáció** mennyire korlátozza a bespoke dizájnt a gyakorlatban? Elfogadható-e a
+   „kevesebb, hossz-toleráns animáció" megkötés az ügyfélnek/ügynökségnek?
+3. **URL-stratégia** (prefix vs domain) a meglévő ügyfél-domainekkel — és a `hreflang`/sitemap-generálás.
