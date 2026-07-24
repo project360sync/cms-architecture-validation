@@ -370,7 +370,74 @@ az AI-szerkesztés, a kollekció-koncepció. **Cserélendő mag:** a horgonyzás
 
 ---
 
-## 12. Siker-kritérium
+## 12. Korlátok — amire nem ad választ, és mikor válassz mást
+
+> Ez a szekció szándékosan **a saját javaslat ellen** érvel. A validáció legfontosabb
+> része nem az, hogy a modell belülről koherens-e (az), hanem hogy a **valós igény**
+> tényleg ez-e — vagy egy szomszédos kategória (erős inkumbenssel) jobban kiszolgálja.
+
+### 12.1 A sweet spot (hogy a határok érthetők legyenek)
+
+**Bespoke, art-directed, jórészt statikus brand/marketing oldal** (ügynökség építi, GSAP/
+animáció, egyedi dizájn), amit egy **nem-technikai ügyfél** tart karban **copy / kép /
+ismétlődő-kártya** szinten, miközben a **fejlesztő marad a struktúra gazdája.** Ez valós,
+alulszolgált rés — de **szűk.**
+
+### 12.2 Amire a modell NEM ad választ (+ mit válassz helyette)
+
+| Igény | Miért esik ki | Helyette |
+|---|---|---|
+| **Tranzakció / valós idejű adat** (bolt, kosár, készlet, foglalás, dinamikus ár, személyre szabás, belépett felhasználó) | statikus kimenet, nincs runtime/backend | **Shopify** / headless commerce / rendes dinamikus app |
+| **Tartalom-gráf, sok újrahasznált entry** (blog 500 poszttal, tag/szerző/kapcsolódó; ugyanaz a „csapattag" több oldalon) | a modell **oldal-központú** (slot/oldal), nem tartalom-gráf | **headless CMS** (Sanity/Contentful/Storyblok) + query |
+| **Adatból generált sok oldal** (500 termékoldal egy forrásból, auto-landingek, auto-sitemap) | oldalról oldalra megy, nincs template-generálás adatból | **Astro/Next** (getStaticPaths) + tartalom-forrás |
+| **Fejlesztő NÉLKÜLI DIY-építés** (az ügyfél maga rakja össze, nincs dev) | **kell** a fejlesztő az annotált template-hez | **Webflow / Framer / Wix / Squarespace** |
+| **Kliens dizájn-szabadság** (hero-átszabás, szekciók szabad mozgatása, új egyedi blokkok) | szándékosan **zárolt struktúra** | **Webflow/Framer** vagy Shopify theme-editor |
+| **i18n / enterprise workflow** (több nyelv, jóváhagyás, ütemezés, A/B, finom szerepkörök) | a névre-kulcsolt tartalom-docnak nincs többnyelv-/workflow-story-ja | **enterprise headless** (Contentful/Sanity/AEM) |
+| **App-szintű interaktivitás** (foglaló naptár, konfigurátor, kalkulátor, embed-app) | ez nem tartalom-edit, hanem funkció | **app-blokkok / integrációk / harmadik-fél embed** |
+
+### 12.3 A legélesebb BELSŐ korlát: GSAP × tartalom-reflow
+
+A modell azt feltételezi, hogy „a tartalom csak érték egy fix DOM-ban". De a tartalom-
+változás **átfolyat**: hosszabb szöveg, több elem, más képarány → a kézzel hangolt
+**ScrollTrigger-pin / mért scroll-táv / SplitText fix sorszámra** **eltörhet vagy elcsúszik.**
+
+Vagyis: **minél bespoke-abb az animáció, annál kevésbé biztonságos a szabad tartalom-edit**
+— ami épp a value prop-ot ássa alá. Két kimenet:
+1. a fejlesztő **„reflow-biztos" animációkat** ír (dizájn-korlát), vagy
+2. az ügyfél csak **nagyon szűk mezőket** szerkeszthet (kevesebb érték a kliensnek).
+
+Ez nem apró él: pont a niche középpontjában (art-directed motion) a legélesebb.
+
+### 12.4 Mikor áll a FELHASZNÁLÓ érdekében mást választani
+
+- **Van boltja / foglalás / tranzakció** → **Shopify** (megoldott platform; sose építsd újra).
+- **Tartalom-nehéz, query-vezérelt, sok oldal** → **headless CMS + SSG**.
+- **Maga akar építeni/dizájnolni, nincs fejlesztő** → **Webflow/Framer**.
+- **Gyakori strukturális/dizájn-változás kell neki** → builder vagy Shopify-theme.
+- **Több nyelv / enterprise ops** → enterprise headless.
+- **Ritkán szerkeszt (évi pár edit)** → **ne építs CMS-t egyáltalán**: adj egy pici
+  „szerkeszd ezt az 5 mezőt" űrlapot, vagy csináld meg helyette. A teljes CMS-réteg
+  túlmérnökölés lehet.
+
+### 12.5 A keresleti kockázat (a legfontosabb, nem-technikai validálandó)
+
+A niche valós, de a veszély: sok ügyfél, aki elsőre ideillőnek tűnik, valójában **átcsúszik
+egy szomszédos kategóriába, aminek erős inkumbense van** (bolt→Shopify, self-build→Webflow,
+tartalom→headless, ritka-edit→semmi).
+
+**Ezért a legfontosabb validálandó nem technikai, hanem KERESLETI:**
+> Hány valódi ügyfél = *bespoke-animált oldal + copy/kép-szintű editet akar + a fejlesztő
+> marad a hurokban* — ÉS egyik szomszédos megoldás sem szolgálja ki jobban?
+
+Ha ez a szám kicsi, a felhasználó érdeke lehet, hogy **ne saját CMS-t építsen, hanem egy
+meglévő platformot húzzon rá / bővítsen**, vagy a modellt szándékosan **egy szomszédos
+kategória felé tolja** (pl. „annotált template + könnyű headless tartalom-gráf", hogy a
+tartalom-nehéz eseteket is vigye). **Ezt a keresleti kérdést érdemes validálni, mielőtt
+bármilyen kódot írunk.**
+
+---
+
+## 13. Siker-kritérium
 
 A modell akkor jó, ha egyszerre igaz:
 - A fejlesztő **átszabhatja a struktúrát + a GSAP-ot**, re-ingesztál, és a **kliens
