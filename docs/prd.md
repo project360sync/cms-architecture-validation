@@ -147,7 +147,7 @@ Baseline mindenhol **0 (pre-launch)** — a termék még nem indult, nincs mért
 | Metric | Role | Timing | Baseline | Target | How measured |
 |---|---|---|---|---|---|
 | **Havonta ≥1 instrumentált önszerkesztést végző fizető ügyfelek száma** | primary | lagging | 0 (pre-launch) | Gate A: ≥2 fizető concierge-ügyfél instrumentált szerkesztéssel [D1] | Szerkesztő-események instrumentálása — mérni, nem kérdezni [D3][ARCH §16.6.b] |
-| **Ügynökségi support-órák / ügyfél / hónap** | guardrail — nem romolhat | leading | 0 (pre-launch, nincs adat) | Nem emelkedhet a self-edit bevezetése után [D3] | Support-óra naplózás ügyfélenként [D3][GAP-G4] |
+| **Ügynökségi support-órák / ügyfél / hónap** | guardrail — nem romolhat | leading | **Per-ügyfél pre-self-edit baseline: a self-edit hozzáférés megnyitása ELŐTTI onboarding-időszak support-óráinak havi átlaga, a Gate A concierge indulásakor mérve** (ma nincs adat [GAP-G4] — a baseline-mérés a Gate A része) | A saját baseline-ablakához képest nem emelkedhet; >10% növekedés = vizsgálat, tartós növekedés = guardrail-sértés [D3] | Support-óra naplózás ügyfélenként, a baseline-ablaktól folyamatosan [D3][GAP-G4] |
 | **Szerkesztő-események (edit events) / ügyfél / hónap** | supporting (vezető jelző) | leading | 0 (pre-launch) | Nem-nulla, ismétlődő szerkesztés a concierge-körben [ARCH §16.6.b] | Instrumentált edit-event telemetria [ARCH §16.6] |
 | **Visszatérő bevétel / ügyfél (MRR-jellegű)** | supporting (lemaradó) | lagging | 0 (pre-launch) | Minta-deal: ~216k HUF/év visszatérő ügyfelenként; 5. ügyfélnél portfólió ~1M HUF/év [GTM §3.5] | Számlázott üzemeltetési díj [GTM §3.2][GTM §3.5] |
 
@@ -155,12 +155,12 @@ Baseline mindenhol **0 (pre-launch)** — a termék még nem indult, nincs mért
 
 ## 8. Milestones & phasing
 
-Teljes build csak minden alkalmazandó §9 kapu után indul. **Timeline dátumok / erőforrás: Research gap** — nincs resourcing/kapacitás-adat [GAP-A5][GAP-G8]; ezért csak entry/exit feltételek, nincsenek naptári dátumok. **Resolution plan:** dátumok az agency-kapacitásmodell felállítása után (László).
+Teljes build csak minden alkalmazandó §9 kapu után indul. **Cél-dátumok: [D5] Provisional decision** (kapacitásmodell nélkül becsült, megerősítendő): prospekt-lista + ÁFA-döntés **2026-08-08**; első concierge-ajánlat **2026-08-31**; Gate A értékelési ablak zárása **2026-11-30**; Gate B referenciaoldal-választás **2026-12-12**. Az erőforrás/kapacitásmodell továbbra is **Research gap** [GAP-A5][GAP-G8] — a dátumok emiatt provisional státuszúak.
 
 | Phase | Goal | Entry condition | Exit / done-when |
 |---|---|---|---|
 | **0 — Kereslet-kapu (concierge)** | Az ARCH §12.5 pontos kérdésének mérése valós, promó-áron, kizárólag létező eszközökkel [ARCH §16.6][D1][D2] | PRD draft elfogadva; kiválasztott valós HU prospektek | Gate A teljesül: ≥2 fizető concierge-átadás instrumentált szerkesztéssel + ≥1 dokumentált off-the-shelf-kudarc bespoke GSAP-on [D1] |
-| **1 — Szűkített technikai spike** | Kizárólag a GSAP × reflow kockázat: mount/refresh/destroy túléli a tipizált szerkesztést + hosszabb szöveget egy VALÓS referenciaoldalon, locale × viewport × font mátrixban — NEM a teljes platform [ARCH §16.6] | Phase 0 fut (párhuzam) vagy teljesült (szekvenciális) | Gate B teljesül: ARCH §15.3 Go-feltétel a referenciaoldalon (determinisztikus re-init, nincs manuális újrahangolás) |
+| **1 — Szűkített technikai spike** | Kizárólag a GSAP × reflow kockázat: mount/refresh/destroy túléli a tipizált szerkesztést + hosszabb szöveget egy VALÓS referenciaoldalon, locale × viewport × font mátrixban — NEM a teljes platform [ARCH §16.6] | **Gate A PASS [D1]** — ennél a projektnél a demand-first sorrend kötött [ARCH §16.6][ARCH §16.7]: nincs párhuzamos spike elindított-de-le-nem-zárt kereslet-kapu mellett | Gate B teljesül: determinisztikus mount/refresh/destroy + hosszváltozás a rögzített mátrixon, manuális újrahangolás nélkül (§9 Gate B küszöb) |
 | **2 — Thin slice → pilot** | Az ARCH §15.3/(A) minimális, fixed-only, single-editor, single-locale spike valós pilot-ügyféllel | Minden alkalmazandó kapu (A, B, és ahol releváns C) zöld | A thin slice pilotban validál: nincs tartalomvesztés, nincs aktív injekció, atomikus/rollbackolható publish, determinisztikus animáció hosszabb szöveggel [ARCH §15.3] |
 | **3 — Teljes build** | A platform proper: ARCH §15.3/(B) majd (C) — konkurencia, teljes locale-policy, audit/RBAC, asset-életciklus, majd composable | A pilot validálja a thin slice-t | §15.3/(B) és (C) tételek leszállítva a P1/P2 kapukkal [ARCH §15.2][ARCH §15.3] |
 
@@ -179,7 +179,7 @@ Minden alkalmazandó kapunak passzolnia kell a teljes build előtt; a legolcsób
 - **A legkockázatosabb ismeretlen:** GSAP × content-reflow egy valós referenciaoldalon — a mount/refresh/destroy túléli a tipizált szerkesztést + hosszabb szöveget locale × viewport × font mátrixban, migrációs motor / atomikus publish / security-render pipeline front-loadolása NÉLKÜL [ARCH §16.6].
 - **Már bizonyított [CMS] (nem ezt támadja a spike):** külső `<script src>` capture same-origin asseté + SRI-pin [CMS ingest.ts:164,166]; allowlist-sanitize (inline+on* dobva) [CMS sanitize.ts]; addItem klónoz vetett skeletont friss id-kkel, Guardian-gated [CMS apply-ops.ts:147]; publikált CSP `default-src 'self'` [CMS serving.ts:3]; immutábilis publish + rollback [CMS publish.ts:14,140]; 176 teszt zöld [CMS package.json]. Megjegyzés: a GSAP-feasibility capability-szinten bizonyított, NEM a literál vibor-oldalon [CMS note].
 - **NEM bizonyított — ezt kell a spike-nak támadnia:** névhez kötött tartalom (az id-k pozíció-alapúak) [CMS NP-1]; re-ingest reconciliation (implementálatlan) [CMS NP-2]; **GSAP túléli a content-reflow-t hosszváltozás alatt — nincs teszt/fixture** [CMS NP-3]; composable mód [CMS NP-4]; multi-locale [CMS NP-5].
-- **Go threshold:** az ARCH §15.3 Go-feltétele — nincs tartalomvesztés, nincs aktív injekció, atomikus/rollbackolható publish, **determinisztikus animáció-re-init hosszabb szöveggel** a referenciaoldalon, manuális újrahangolás nélkül [ARCH §15.3]. "Úgy tűnik, működik" nem elég.
+- **Go threshold (csak a spike scope-jára):** **determinisztikus GSAP mount/refresh/destroy + animáció-re-init ≥2× szöveghossz-változás mellett**, a valós referenciaoldalon, az előre rögzített locale × viewport × font mátrix minden celláján, **manuális újrahangolás nélkül** [ARCH §16.6][CMS NP-3]. "Úgy tűnik, működik" nem elég. — A teljes ARCH §15.3/(A) Go-feltétel (nincs tartalomvesztés, nincs aktív injekció, atomikus/rollbackolható publish) **nem ennek a kapunak a küszöbe**: azok a Phase 2 thin-slice exit-feltételei, mert az ott felépülő rendszereket mérik [ARCH §15.3].
 
 **Gate C — Viability (business).** Alkalmazandó.
 - **Margin-evidencia:** ügynökségi infra-költség ~1–3k HUF/oldal/hó → **3–5× árrés** már az Alap üzemeltetési tieren is [GTM §3.2]; reuse-szal a Business build ~40–70 óra → profitábilis 500k–1M-nél [GTM §3.4].
@@ -196,7 +196,7 @@ Minden alkalmazandó kapunak passzolnia kell a teljes build előtt; a legolcsób
 
 | Assumption | Why load-bearing | Falsification criterion | Test / owner |
 |---|---|---|---|
-| A1 — Létezik a kereslet: elég valós HU ügyfél = bespoke-animált oldal + copy/kép-szintű szerkesztés + fejlesztő a hurokban — ÉS egyetlen adjacent megoldás sem szolgálja jobban [ARCH §12.5] | Ha nincs, nincs termék; ez a legfontosabb nem-technikai validáció | A concierge-körben a D1-küszöb alatt marad (kevesebb mint 2 fizető átadás + dokumentált off-the-shelf-kudarc) [D1] | Gate A concierge / László |
+| A1 — Létezik a kereslet: elég valós HU ügyfél = bespoke-animált oldal + copy/kép-szintű szerkesztés + fejlesztő a hurokban — ÉS egyetlen adjacent megoldás sem szolgálja jobban [ARCH §12.5] | Ha nincs, nincs termék; ez a legfontosabb nem-technikai validáció | **A D1 go-feltétel pontos negációja a rögzített mintán/időablakban (D5, zárás 2026-11-30): kevesebb mint 2 fizető átadás VAGY nulla dokumentált, releváns off-the-shelf-kudarc** — tehát 2 fizető ügyfél MELLETT, off-the-shelf-kudarc nélkül is bukik a tézis (akkor a meglévő eszköz elég, nem kell egyedi architektúra) [D1] | Gate A concierge / László |
 | A2 — Full-price WTP a promó után: a Business-áras (500k–1M) build valós fizetési szándékot élvez, nem csak a promó-terms mellett | Az LTV és a §9 Gate C erre épül; a D2 promó csak promó-keresletet bizonyít | Az első nem-promó, Business-áras ajánlatot ≥2 egyébként illő prospekt visszautasítja (decision register, D2-ből származó feltevés) | Gate C / László |
 | A3 — Az off-the-shelf eszközök ténylegesen elbuknak a bespoke GSAP-on | Ha nem buknak el, a megkülönböztető érték eltűnik | Storyblok / edit-N-mezős űrlap gond nélkül kiszolgál egy bespoke GSAP-buildot (→ ARCH §16.6.c) [GAP-A8] | Gate A (c) mérés / László |
 | A4 — 40–70h reuse-gazdaságosság: reuse-szal a Business build ~40–70 óra (nem 150) → profitábilis [GTM §3.4] | Az árrés és a fix-csomag árazás erre épül | A GTM §6 Q2 mérés a tényleges óraszámot lényegesen 70 fölött találja [GAP-G2] | GTM §6 Q2 óra-mérés / László |
@@ -215,10 +215,10 @@ Minden alkalmazandó kapunak passzolnia kell a teljes build előtt; a legolcsób
 
 | Question | Owner | Resolve-by | Decision (once made) |
 |---|---|---|---|
-| ÁFA / nettó-bruttó árkezelés a tiereknél [GAP-G9] | László | Gate A concierge-ajánlat előtt | — |
-| Pro-tier SLA definíció (válaszidő/uptime) [GAP-G11] | László | Phase 2 pilot előtt (P1) | — |
-| Nevesített prospekt-lista (0 committed/signed) [GAP-A1][GAP-G1] | László | Gate A indítása előtt | — |
-| Spike referenciaoldal + locale/viewport/font mátrix kiválasztása [GAP-A7] | László | Gate B (Phase 1) indítása előtt | — |
+| ÁFA / nettó-bruttó árkezelés a tiereknél [GAP-G9] | László | **2026-08-08** (az első concierge-ajánlat előtt, [D5]) | — |
+| Pro-tier SLA definíció (válaszidő/uptime) [GAP-G11] | László | **2027-01-31** (a Phase 2 pilot előtt, [D5] provisional) | — |
+| Nevesített prospekt-lista (0 committed/signed) [GAP-A1][GAP-G1] | László | **2026-08-08** [D5] | — |
+| Spike referenciaoldal + locale/viewport/font mátrix kiválasztása [GAP-A7] | László | **2026-12-12** (Gate A zárása után, Gate B indítása előtt, [D5]) | — |
 
 ---
 
@@ -240,5 +240,6 @@ Minden alkalmazandó kapunak passzolnia kell a teljes build előtt; a legolcsób
 | D3 | Primary metrika: fizető-ügyfelek ≥1 self-edit/hó / MRR / összes edit-event | **Havonta ≥1 instrumentált self-editet végző fizető ügyfelek száma; guardrail: ügynökségi support-óra/ügyfél/hó nem emelkedhet** | confirmed | user answer, 2026-07-24 |
 | D4 | Termék-framing: belső ügynökségi eszköz vs SaaS | **Ügynökség-üzemeltetett phase 1; self-serve = explicit phase-2 non-goal ("ne itt kezdd")** | confirmed (evidence) | GTM §5 + ARCH §12.1 |
 | — | Derived from D2 (§10 A2) | Full-price WTP (500k–1M build) UNVALIDATED — a promó-eladás csak promó-terms-en bizonyít; falszifikáció: első nem-promó Business-áras ajánlatot ≥2 illő prospekt visszautasít | flagged | decision register |
+| D5 | Cél-dátumok (kapacitásmodell nélkül): prospekt-lista + ÁFA 2026-08-08 / első ajánlat 2026-08-31 / Gate A zárás 2026-11-30 / Gate B ref-oldal 2026-12-12 / SLA 2027-01-31 | **Javasolt dátumok elfogadva provisional-ként** | **provisional** — rationale: kapacitás-adat nélküli becslés; owner: László; **confirm-by: e PR merge-e** | orchestrátor-javaslat, 2026-07-24 |
 
 **Technical design pointer.** A HOGYAN külön dokumentumban él (sibling `tech-spec-template.md`). Elkezdhető a PRD jóváhagyása ELŐTT, mivel a feasibility-spike (Gate B) a legolcsóbb/legdöntőbb kapu lehet — a tech-spec `spike` mélységet támogat, amely `delivery` mélységig mélyül. Implementációs részlet ne kerüljön ebbe a PRD-be; ide linkelve.

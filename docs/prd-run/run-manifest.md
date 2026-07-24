@@ -23,6 +23,18 @@
 | Honesty | 9/10 | self-undermining redirect rows preserved; reflow limit + consequence stated |
 | Metric quality | 9/10 | behavioral+instrumented primary, real counter-gaming guardrail |
 
-Conformance: PASS (0 defects, 3 informational notes). Exit: DONE in round 1 (all ≥9 + PASS + no load-bearing open gap; D1–D4 confirmed).
+Conformance (round 1): reported PASS with notes — **overturned by external review** (relative resolve-by dates violate the skill's absolute-dates rule → round-1 conformance retroactively FAIL).
 Note: conformance reviewer instance #1 glitched (empty output, 0 tool calls) and was re-run fresh; scores were never shown to any scorer (round 1 = trivially blind).
-"Missing for 10" follow-ups (not applied — scored artifact shipped as scored): sub-letter cites spelled inline; absolute resolve-by dates; target-vs-proven CSP callout; guardrail support-hours baseline measured during Gate A; hard cutoff for A4 hours (e.g. >90h); post-gate trajectory target for the primary metric.
+
+## CORRECTION after external (Codex) review — 2026-07-24
+The round-1 "DONE" exit was a **category error by the orchestrator** and is
+retracted: per the skill, open **load-bearing** assumptions (A1 demand, A3
+substitution, A5 reflow — all untested until Gate A/B run) cap the run at
+**`verification pending`**. D1–D5 confirm *user decisions*, not evidence.
+
+**Run status: `verification pending`** — scores may all be ≥9 and conformance
+PASS, but the run cannot be "done" until Gate A and Gate B close with real
+evidence. Full round-1 scorer/conformance outputs are committed under
+[`scores-round1/`](scores-round1/) for auditability; a round-2 re-score of the
+revised sections follows the 8 accepted external findings (see ledger below
+when appended).

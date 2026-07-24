@@ -1,5 +1,12 @@
 # Evidence inventory — claude-cms codebase (feasibility / Gate B input)
-Source: /Users/jarvis/Documents/projects/claude-cms/.claude/worktrees/vibor-gsap-cms (working prototype; PREDECESSOR position-anchored model of the planned greenfield rewrite).
+Source (pinned, reproducible):
+- Repo: https://github.com/peterjuhasz/claude-cms — branch `feat/vibor-gsap-cms`,
+  commit **`0b56a13d631c1d88be2a1b118f373b50a02b1ec2`** (clean tree at inventory time).
+  All `[CMS <path>:<line>]` pointers below resolve at
+  `https://github.com/peterjuhasz/claude-cms/blob/0b56a13d631c1d88be2a1b118f373b50a02b1ec2/<path>`.
+- Test evidence: `npm test` (vitest) run at this commit on 2026-07-24 —
+  **19 files / 176 tests, all passed**; captured log: [`claude-cms-test-log.txt`](claude-cms-test-log.txt).
+- Role: working prototype; PREDECESSOR position-anchored model of the planned greenfield rewrite.
 
 [CMS docs/adr/ADR-003-author-js-and-editable-collections.md:30] DECISION: author JS allowed as locked, external, same-origin <script src> bundles only — inline + on* stripped, CSP script-src 'self', every captured bundle SRI hash-pinned at ingest.
 [CMS docs/adr/ADR-003:42] DECISION: content ships as static HTML in the document; JS may only animate/toggle/wire existing DOM, never render content.
