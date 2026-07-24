@@ -38,3 +38,22 @@ evidence. Full round-1 scorer/conformance outputs are committed under
 [`scores-round1/`](scores-round1/) for auditability; a round-2 re-score of the
 revised sections follows the 8 accepted external findings (see ledger below
 when appended).
+
+## Round 2 ledger — 2026-07-24 (after the 8 external findings were applied)
+Revised sections: §7 guardrail baseline; §8 dates + Phase-1 entry; §9 Gate B threshold rescope; §10 A1 negation + absolute dates; §11 D5 row; evidence-cms pinned + test log. Scorers: fresh instances, blind (scores-round1/ + manifest ledger explicitly off-limits).
+
+| Metric | R1 | R2 (effective) | Change tied to |
+|---|---|---|---|
+| Evidence-grounding | 9 | 9 | pinned CMS evidence + [D5] labels verified |
+| Completeness | 9 | 9 | absolute dates; all schemas re-verified |
+| Internal consistency | 9 | 9 | De Morgan A1↔Gate A checked; Gate B↔Phase 2 exit checked |
+| Actionability | 9 | 9 | dates + owners + executable gates re-verified |
+| Falsifiability | 9 | 9 | A1 exact negation confirmed; Gate B scope-tight |
+| Honesty | 9 | 9 | self-undermining rows + reflow consequence re-verified |
+| Metric quality | 9 | 9 | guardrail baseline window + tolerance now defined |
+
+Conformance round 2: **FAIL** on one isolated defect (D5 confirm-by event-relative) → fixed (absolute date 2026-07-31) → **round 2b full independent re-check: PASS** (all dates absolute, all schemas exact).
+
+**RUN STATUS: `verification pending`** — all metrics ≥9 and conformance PASS, but load-bearing assumptions A1/A3/A5 remain open until Gate A (close: 2026-11-30) and Gate B deliver real evidence. This is the correct terminal state for a pre-validation PRD under the skill's invariant.
+
+Remaining "missing for 10" follow-ups (non-blocking): §7 >10% band labeled as operational threshold not [D3]; §11 restate pinned CMS commit in-doc; A4 hard hour-cutoff (>70h on first two reuse-eligible builds); numeric post-gate edit-frequency target; §7 Gate A framing tightened to the full conjunction.
