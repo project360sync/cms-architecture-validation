@@ -87,3 +87,15 @@ evidence-cms.md (permalinks). Scorer artifacts: scores-round3/, persisted verbat
 Conformance: PASS (0 defects, 2 NOTEs, no SPEC-AMBIGUITY). Artifacts: scores-round3/ (persisted verbatim).
 Follow-ups carried (non-blocking, missing-for-10): §4 tier-pairing synthesis labeled; interim perf/a11y targets; §7 Gate-A-label full conjunction; capacity-model resolve-by row; A4 hard cutoff; guardrail single breach condition ("tartós" duration).
 Run status: `verification pending` (unchanged — load-bearing A1/A3/A5 open until Gate A/B). Phase-6 audit: pending, report to follow as audit-round3.md.
+
+## Post-QC amendment — 2026-07-24 (D6+D7, user-decided)
+After the QC run closed, the user resequenced: Gate A no longer blocks the spike
+(parallel track; still blocks Phase-3 full-platform commitment); rationale: the
+measured AI-assisted build velocity (5-6 person-months of value in days)
+invalidated the cost premise behind demand-first, and a bulletproof restructured
+core is the prerequisite for onboarding existing clients (Gate A evidence will
+come from real clients on migrated live sites; substitution test (c) replaced by
+documented comparison). D7: spike builds on the claude-cms branch with a
+rewrite-over-reuse policy, no backward compatibility. Amendment is a decision
+change, not new factual claims; re-score deferred — affected sections (§8/§9/§11)
+carry [D6]/[D7] citations to the register.
