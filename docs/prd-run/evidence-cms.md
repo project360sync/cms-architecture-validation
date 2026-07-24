@@ -2,20 +2,26 @@
 Source (pinned, reproducible):
 - Repo: https://github.com/peterjuhasz/claude-cms — branch `feat/vibor-gsap-cms`,
   commit **`0b56a13d631c1d88be2a1b118f373b50a02b1ec2`** (clean tree at inventory time).
-  All `[CMS <path>:<line>]` pointers below resolve at
-  `https://github.com/peterjuhasz/claude-cms/blob/0b56a13d631c1d88be2a1b118f373b50a02b1ec2/<path>`.
+  Every `[CMS <path>:<line>]` pointer below is mechanically resolvable as a
+  GitHub permalink: `https://github.com/peterjuhasz/claude-cms/blob/0b56a13d631c1d88be2a1b118f373b50a02b1ec2/<path>#L<line>`
+  (all paths are full repo-relative paths). Worked examples:
+  [ADR-003 decision](https://github.com/peterjuhasz/claude-cms/blob/0b56a13d631c1d88be2a1b118f373b50a02b1ec2/docs/adr/ADR-003-author-js-and-editable-collections.md#L30) ·
+  [ingest SRI pin](https://github.com/peterjuhasz/claude-cms/blob/0b56a13d631c1d88be2a1b118f373b50a02b1ec2/src/server/services/ingest.ts#L166) ·
+  [addItem apply](https://github.com/peterjuhasz/claude-cms/blob/0b56a13d631c1d88be2a1b118f373b50a02b1ec2/src/server/services/apply-ops.ts#L147) ·
+  [published CSP](https://github.com/peterjuhasz/claude-cms/blob/0b56a13d631c1d88be2a1b118f373b50a02b1ec2/src/server/serving.ts#L3) ·
+  [publish/rollback](https://github.com/peterjuhasz/claude-cms/blob/0b56a13d631c1d88be2a1b118f373b50a02b1ec2/src/server/services/publish.ts#L14).
 - Test evidence: `npm test` (vitest) run at this commit on 2026-07-24 —
   **19 files / 176 tests, all passed**; captured log: [`claude-cms-test-log.txt`](claude-cms-test-log.txt).
 - Role: working prototype; PREDECESSOR position-anchored model of the planned greenfield rewrite.
 
 [CMS docs/adr/ADR-003-author-js-and-editable-collections.md:30] DECISION: author JS allowed as locked, external, same-origin <script src> bundles only — inline + on* stripped, CSP script-src 'self', every captured bundle SRI hash-pinned at ingest.
-[CMS docs/adr/ADR-003:42] DECISION: content ships as static HTML in the document; JS may only animate/toggle/wire existing DOM, never render content.
-[CMS docs/adr/ADR-003:49] DECISION: editable collections via data-cms-collection/data-cms-item + addItem EditOp cloning vetted skeleton markup.
-[CMS docs/adr/ADR-003:92] DECISION: editor Edit/Preview toggle — Edit strips bundles (stable DOM for click-to-edit), Preview injects read-only; live serving always includes bundles.
+[CMS docs/adr/ADR-003-author-js-and-editable-collections.md:42] DECISION: content ships as static HTML in the document; JS may only animate/toggle/wire existing DOM, never render content.
+[CMS docs/adr/ADR-003-author-js-and-editable-collections.md:49] DECISION: editable collections via data-cms-collection/data-cms-item + addItem EditOp cloning vetted skeleton markup.
+[CMS docs/adr/ADR-003-author-js-and-editable-collections.md:92] DECISION: editor Edit/Preview toggle — Edit strips bundles (stable DOM for click-to-edit), Preview injects read-only; live serving always includes bundles.
 [CMS src/server/services/ingest.ts:164] Proven: external <script src> captured as same-origin /a/<id> assets, before image flood (asset-cap ordering fix).
-[CMS src/server/services/ingest.ts:166 + ingest.test.ts:160] Proven: SRI integrity="sha256-…" pinned per captured bundle from exact stored bytes.
+[CMS src/server/services/ingest.ts:166 + src/server/services/ingest.test.ts:160] Proven: SRI integrity="sha256-…" pinned per captured bundle from exact stored bytes.
 [CMS src/server/services/sanitize.ts] Proven: allowlist sanitize — inline scripts + on* dropped, incoming data-* stripped before annotation.
-[CMS src/server/services/apply-ops.ts:147 + guardian.ts:47] Proven: addItem clones template subtree from stored sanitized skeleton (never client markup), mints fresh ids, Guardian-gated, allowed in safe/client mode.
+[CMS src/server/services/apply-ops.ts:147 + src/server/services/guardian.ts:47] Proven: addItem clones template subtree from stored sanitized skeleton (never client markup), mints fresh ids, Guardian-gated, allowed in safe/client mode.
 [CMS src/components/editor/EditorShell.tsx:102] Proven: Edit/Preview toggle in the editor (mode=preview reload with bundles).
 [CMS src/server/serving.ts:3] Proven: published CSP default-src 'self'; script-src 'self'; base-uri 'none'; frame-ancestors 'self' — SRI-pinned same-origin bundles run, inline blocked.
 [CMS src/server/services/publish.ts:14,140] Proven: immutable publish snapshots (version freeze + atomic pointer flip) and one-click rollbackSite().

@@ -57,3 +57,23 @@ Conformance round 2: **FAIL** on one isolated defect (D5 confirm-by event-relati
 **RUN STATUS: `verification pending`** — all metrics ≥9 and conformance PASS, but load-bearing assumptions A1/A3/A5 remain open until Gate A (close: 2026-11-30) and Gate B deliver real evidence. This is the correct terminal state for a pre-validation PRD under the skill's invariant.
 
 Remaining "missing for 10" follow-ups (non-blocking): §7 >10% band labeled as operational threshold not [D3]; §11 restate pinned CMS commit in-doc; A4 hard hour-cutoff (>70h on first two reuse-eligible builds); numeric post-gate edit-frequency target; §7 Gate A framing tightened to the full conjunction.
+
+## Round 3 — 2026-07-24 (after external round-2 findings; scorer re-run on the FINAL doc)
+Trigger: external review — the D5 conformance fix changed the doc after the round-2 scorers saw it, so a fresh blind score round is required (Phase 5 rule); plus mechanical fixes (full-path permalinks in evidence-cms, §11 demand-first clarification, EOF whitespace).
+
+**Normalization procedure:** section text extracted by `## <n>.` headers; whitespace runs collapsed to single spaces; sha256 (first 16 hex chars). Metric → section-set mapping and input hashes at round-3 start:
+
+| Metric | Section set | Normalized hash (sha256/16) |
+|---|---|---|
+| Evidence-grounding | whole doc | `db7e3997d700f8c4` |
+| Completeness | whole doc | `db7e3997d700f8c4` |
+| Internal-consistency | §0,§5,§7,§8,§9,§10,§11 | `a4189789fe11bea9` |
+| Actionability | §8,§9,§10 | `c3db6ba7831bf09a` |
+| Falsifiability | §9,§10 | `19508dec0d8a4f73` |
+| Honesty | §3,§4,§9 | `47e8163db408d400` |
+| Metric-quality | §7 | `cfecdfd554d1fe11` |
+
+(R1/R2 input hashes were not captured at the time — a process defect the skill now
+fixes [prompt-collection PR #6]; R3 onward records them. R2→R3 changed sections:
+§10/§11 (D5 confirm-by date), §11 (tech-spec pointer demand-first clarification),
+evidence-cms.md (permalinks). Scorer artifacts: scores-round3/, persisted verbatim.)
