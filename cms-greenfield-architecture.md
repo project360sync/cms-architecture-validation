@@ -996,8 +996,9 @@ hidden policy a hidratáláson **belül**, locale-publikálást bukathat).
 
 ### 16.2 Reconciliation & migráció — teljes protokoll (P0.4 kiegészítés)
 
-A §4.4 auto-name-match csak *törlésre* védett (quarantine). Az adverzariális kör három nem kezelt
-esetet talált, amelyek cáfolják a „nincs vak felülírás" ígéretet. Feloldás:
+A §4.4 auto-name-match csak *törlésre* védett (quarantine). Az adverzariális kör több nem kezelt
+esetet talált (az eredeti három mellé a §16.2 round-0 tekintély-kihívása továbbiakat), amelyek
+cáfolják a „nincs vak felülírás" ígéretet. Feloldás:
 
 **Precedencia (definiálva):** az explicit migrációs manifest **mindig nyer**; az automatikus
 név-egyezés csak a *maradékot* viszi tovább — azokat a `(scopeId, fieldName)` párokat, amelyek neve
@@ -1010,7 +1011,7 @@ számítódik, a manifest minden bejegyzése minden locale-ra alkalmazódik, és
 `(locale, scopeId, fieldName)` hármasra kulcsoltak. Egy locale-ban hiányzó forrásérték az adott
 locale-ban no-op, nem hiba. Ha egy `(scopeId, fieldName)` pár neve és scope-ja változatlan, de a
 **típusa** megváltozott, az **nem maradék**: explicit `transform` nélkül a forrásérték
-quarantine-ba kerül, a slot pedig `new-empty`-ként jelenik meg a diffben. Típusváltás sosem megy át
+quarantine-ba kerül, a slot pedig **érték nélkül** marad. Típusváltás sosem megy át
 néma `kept`-ként.
 
 A manifest bejegyzései **egyidejűleg**, a migráció előtti tartalom egyetlen pillanatképe fölött
@@ -1026,8 +1027,9 @@ fel nem oldható bejegyzés a **teljes migrációt** elutasítja a dry-run szaka
 
 **Név-csere (`line1`↔`line2`) — némán korrupt volt, most tiltott.** Mivel a match scope+név szerint
 történik, a csere két egyidejű átnevezésként detektálható. Ha egy scope-on belül a mező-névhalmaz
-megváltozik, az auto-match **nem cross-assignol**: vagy explicit `rename`/`move` bejegyzés kell,
-vagy a nem egyértelmű mezők quarantine-ba mennek. Néma érték-áthelyezés nem történhet.
+megváltozik (az alábbi értelemben **nem tiszta** hozzáadás/törlés), az auto-match **nem
+cross-assignol**: vagy explicit `rename`/`move` bejegyzés kell, vagy a nem egyértelmű mezők
+quarantine-ba mennek. Néma érték-áthelyezés nem történhet.
 
 "Tiszta hozzáadás/törlés" azt jelenti, hogy a scope-ban **vagy csak** új mezőnév jelenik meg,
 **vagy csak** mezőnév tűnik el. Ha egy scope-on belül **egyszerre** van megjelenő és eltűnő név, a
@@ -1048,7 +1050,7 @@ Egy meglévő mező `required`-dé tétele (pl. `altRequired:true`) **migráció
 default-értéket, az érintett sorok **draft-quarantine**-ba mennek és az adott locale/section
 publikálhatóságát blokkolják egy világos diffel — **nem** a teljes site-publisht bukatják némán.
 Az implementáció **sosem talál ki alapértéket** (üres string sem alapérték). A manifest-adta
-kitöltés a diffben külön, nevesített `default-filled` soron jelenik meg, sorszámmal.
+kitöltés a diff **cél-oldali listáján** `default-filled` soron jelenik meg, sorszámmal.
 
 **Migrációs operátorok (specifikálva):**
 
@@ -1061,25 +1063,32 @@ kitöltés a diffben külön, nevesített `default-filled` soron jelenik meg, so
 | `merge` | `[f1, f2] → f` explicit kombinátorral | split inverz |
 | `delete` | `f → quarantine` (nem hard-törlés) | restore quarantine-ból |
 
-Ha egy `rename`/`move`/`split`/`merge` **célslotja** a migráció előtti tartalomban már hordoz
-értéket, a művelet nem írja felül: az ütközés a **dry-run szakaszban elutasítja a teljes
-migrációt**. A cél felszabadítását a manifest explicit `delete` (→ quarantine) bejegyzésével kell
-kimondani. Vak felülírás nem történhet.
+Ha egy `rename`/`move`/`split`/`merge` **célslotja** a migráció előtti tartalomban értéket hordoz, és
+ezt az értéket a manifest **egyetlen operátora sem forrásként fogyasztja el**, a művelet nem írja
+felül: az ütközés a **dry-run szakaszban elutasítja a teljes migrációt**. A cél felszabadítását a
+manifest explicit `delete` (→ quarantine) bejegyzésével kell kimondani. Vak felülírás nem történhet.
+Két bejegyzés, amely **ugyanarra a célslotra** ír, minden esetben ütközés.
 
-A quarantine **rekord, nem jelölés**: minden quarantine-sor tárolja a
+A **quarantine** (eltávolított érték megőrzése) és a **draft-quarantine** (hiányzó `required` mező
+miatt publikálásból kizárt sor) két külön fogalom; az alábbi szerződés a **quarantine**-ra
+vonatkozik. A quarantine **rekord, nem jelölés**: minden quarantine-sor tárolja a
 `(locale, scopeId, fieldName)` hármast, a **nyers értéket**, a forrás mezőtípust, a forrás
-`templateVersion`-t és az okot (`orphan | ambiguous | type-changed | non-invertible-transform |
-delete | target-occupied`), és az aktiválás után is megmarad, hogy a `restore` végrehajtható legyen.
-Érték nélküli quarantine-sor **nem** elégíti ki a §4.4 "nem tűnik el némán" követelményét.
+`templateVersion`-t és az okot (`orphan | ambiguous | impure-scope | type-changed |
+non-invertible-transform | delete`), és az aktiválás után is megmarad, hogy a `restore`
+végrehajtható legyen. Érték nélküli quarantine-sor **nem** elégíti ki a §4.4 "nem tűnik el némán"
+követelményét. A **draft-quarantine** sor a collection-item identitását és a blokkoló mezőnevet
+tárolja; nem hordoz eltávolított értéket, és nem elégíti ki a fenti szerződést, mert nem is
+érték-eltávolítás.
 
 Az invertálhatóság **deklarált, nem levezetett**: egy `transform` akkor és csak akkor invertálható,
 ha a manifest megnevez hozzá egy verziózott inverz függvényt. Minden más `transform`
 non-invertálhatónak számít, és a forrásérték **quarantine-ban marad**. Mintaértékeken végzett
 round-trip **nem** bizonyít invertálhatóságot.
 
-**Hatókör:** az operátorok **section-instance, block, collection-item ÉS item-mező** szinten is
-működnek (nem csak page-mezőn). A `transform` determinisztikus és mellékhatás-mentes, hogy a dry-run
-és a rollback reprodukálható legyen. A `split` és `merge` operandusai **kvalifikált**
+**Hatókör:** az operátorok **scope-ja** lehet section-instance, block vagy collection-item, és
+minden esetben az adott scope **mezőire** hatnak (nem csak page-mezőre). A `transform`
+determinisztikus és mellékhatás-mentes, hogy a dry-run és a rollback reprodukálható legyen.
+A `split` és `merge` operandusai **kvalifikált**
 `(scopeId, fieldName)` párok, és minden operandusnak **ugyanabban a scope-ban** kell lennie;
 scope-ok közötti összevonás csak `move` + `merge` láncként fejezhető ki. Kollekcióra alkalmazva az
 operátorok **item-mező szinten, minden itemre külön** futnak: a scope a collection-item, az
@@ -1098,15 +1107,18 @@ aktiválás **elutasítva** (`StaleMigration`), és új dry-run kell. Az aktivá
 egyetlen bázis-revízióval** — a §16.4 revision-guard az aktiválásra is vonatkozik. Az aktiválás
 atomicitási határa **egyetlen revízió**: az új content-doc, a **quarantine-rekordok** és a
 `templateVersion`-váltás ugyanabban a revízióban landol. Ha a quarantine nem tud ugyanabban a
-revízióban landolni, a migráció **nem aktiválható**.
+revízióban landolni, a migráció **nem aktiválható**. Az aktiválás után az **előző template- és
+content-verzió megmarad**, hogy a rollback végrehajtható legyen.
 
-A diff sorai a **forrás** `(locale, scopeId, fieldName)` slotokra **partícionálnak**: minden tárolt
-forrásérték **pontosan egy** kategóriába kerül, és a sor felsorolja a rá alkalmazott teljes
-operátor-láncot. A `split` és a `merge` a `transformed` kategóriába esik; egy `merge` minden
-**nem-cél forrása ezen felül quarantine-sort kap**. Több operátor esetén a sor a legerősebb
-kategóriában jelenik meg (quarantined > transformed > moved > renamed > kept). A `new-empty`
-**kizárólag** olyan új slot, amelyre semmilyen forrásérték nem érkezik; érték nélküli megmaradó slot
-nem `kept`.
+A dry-run diff két részből áll. (a) A **forrás-oldali partíció**: minden tárolt forrásérték —
+`(locale, scopeId, fieldName)` — **pontosan egy** kategóriába kerül a hat közül, és a sora
+felsorolja a rá alkalmazott teljes operátor-láncot. Több operátor esetén a sor a legerősebb
+kategóriában jelenik meg (quarantined > transformed > moved > renamed > kept). Egy `merge`
+**nem-cél forrásai** a `quarantined` kategóriába esnek, a cél-forrás a `transformed`-be; a `split`
+forrása `transformed`. (b) A **cél-oldali lista**: azok az új vagy megmaradó slotok, amelyekre
+semmilyen forrásérték nem érkezik — `new-empty`, ha nincs kitöltésük, `default-filled`, ha a
+manifest explicit alapértéket ad. A cél-oldali lista **nem** a hat kategória része, és nem tartalmaz
+forrásértéket.
 
 ### 16.3 Biztonságos render-szerződés — teljes sink-lista + import-izoláció (P0.3 kiegészítés)
 
