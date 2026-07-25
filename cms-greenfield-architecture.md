@@ -1120,7 +1120,7 @@ kategóriában jelenik meg (quarantined > transformed > moved > renamed > kept).
 **nem-cél forrásai** a `quarantined` kategóriába esnek, a cél-forrás a `transformed`-be; a `split`
 forrása `transformed`. (b) A **cél-oldali lista**: azok az új vagy megmaradó slotok, amelyekre
 semmilyen forrásérték nem érkezik — `new-empty`, ha nincs kitöltésük, `default-filled`, ha a
-manifest explicit alapértéket ad. A cél-oldali lista **nem** a hat kategória része, és nem tartalmaz
+manifest explicit alapértéket ad. A cél-oldali lista **nem** a forrás-oldali kategóriák része, és nem tartalmaz
 forrásértéket.
 
 ### 16.3 Biztonságos render-szerződés — teljes sink-lista + import-izoláció (P0.3 kiegészítés)
