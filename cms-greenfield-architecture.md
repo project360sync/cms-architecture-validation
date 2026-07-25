@@ -1065,19 +1065,21 @@ kitöltés a diff **cél-oldali listáján** `default-filled` soron jelenik meg,
 
 Ha egy `rename`/`move`/`split`/`merge` **célslotja** a migráció előtti tartalomban értéket hordoz, és
 ezt az értéket a manifest **egyetlen operátora sem forrásként fogyasztja el**, a művelet nem írja
-felül: az ütközés a **dry-run szakaszban elutasítja a teljes migrációt**. A cél felszabadítását a
-manifest explicit `delete` (→ quarantine) bejegyzésével kell kimondani. Vak felülírás nem történhet.
-Két bejegyzés, amely **ugyanarra a célslotra** ír, minden esetben ütközés.
+felül: az ütközés a **dry-run szakaszban elutasítja a teljes migrációt**. Fogyasztásnak **kizárólag**
+a manifest valamely operátorának forrás-hivatkozása számít; az auto-match által továbbvitt érték
+**nem** fogyasztott, így az őt célzó manifest-bejegyzés helyesen elutasításra kerül. A cél
+felszabadítását a manifest explicit `delete` (→ quarantine) bejegyzésével kell kimondani. Vak
+felülírás nem történhet.
 
 A **quarantine** (eltávolított érték megőrzése) és a **draft-quarantine** (hiányzó `required` mező
 miatt publikálásból kizárt sor) két külön fogalom; az alábbi szerződés a **quarantine**-ra
 vonatkozik. A quarantine **rekord, nem jelölés**: minden quarantine-sor tárolja a
 `(locale, scopeId, fieldName)` hármast, a **nyers értéket**, a forrás mezőtípust, a forrás
 `templateVersion`-t és az okot (`orphan | ambiguous | impure-scope | type-changed |
-non-invertible-transform | delete`), és az aktiválás után is megmarad, hogy a `restore`
+non-invertible-transform | delete | merged`), és az aktiválás után is megmarad, hogy a `restore`
 végrehajtható legyen. Érték nélküli quarantine-sor **nem** elégíti ki a §4.4 "nem tűnik el némán"
-követelményét. A **draft-quarantine** sor a collection-item identitását és a blokkoló mezőnevet
-tárolja; nem hordoz eltávolított értéket, és nem elégíti ki a fenti szerződést, mert nem is
+követelményét. A **draft-quarantine** sor a `(locale, collection, itemId)` hármast és a blokkoló
+mezőnevet tárolja; nem hordoz eltávolított értéket, és nem elégíti ki a fenti szerződést, mert nem is
 érték-eltávolítás.
 
 Az invertálhatóság **deklarált, nem levezetett**: egy `transform` akkor és csak akkor invertálható,
@@ -1086,9 +1088,9 @@ non-invertálhatónak számít, és a forrásérték **quarantine-ban marad**. M
 round-trip **nem** bizonyít invertálhatóságot.
 
 **Hatókör:** az operátorok **scope-ja** lehet section-instance, block vagy collection-item, és
-minden esetben az adott scope **mezőire** hatnak (nem csak page-mezőre). A `transform`
-determinisztikus és mellékhatás-mentes, hogy a dry-run és a rollback reprodukálható legyen.
-A `split` és `merge` operandusai **kvalifikált**
+minden esetben az adott scope **mezőire** hatnak (a mezőidentitás mindig `(scopeId, fieldName)`,
+§16.1). A `transform` determinisztikus és mellékhatás-mentes, hogy a dry-run és a rollback
+reprodukálható legyen. A `split` és `merge` operandusai **kvalifikált**
 `(scopeId, fieldName)` párok, és minden operandusnak **ugyanabban a scope-ban** kell lennie;
 scope-ok közötti összevonás csak `move` + `merge` láncként fejezhető ki. Kollekcióra alkalmazva az
 operátorok **item-mező szinten, minden itemre külön** futnak: a scope a collection-item, az
@@ -1097,9 +1099,10 @@ operandus a mezője. **Sorok** (collection-item) összevonása, törlése vagy l
 és verzióval** hivatkozható; az implementáció a kódbázis zárt, tesztelt registryjében él. A manifest
 sosem hordoz függvénytestet, kifejezést vagy DSL-t. Ismeretlen név vagy verzió → a dry-run elutasít.
 
-**Kötelező dry-run diff** (a §4.4-ből P0.4-be emelve): a re-ingeszt előbb egy diffet ad
-(`kept / renamed / moved / transformed / quarantined / new-empty`), ami emberi jóváhagyás nélkül nem
-aktiválható. A dry-run diff a jóváhagyás **tárgya és egyben az aktiválás bemenete**: a diff hordozza
+**Kötelező dry-run diff** (a §4.4-ből P0.4-be emelve): a re-ingeszt előbb egy diffet ad, amelynek
+**forrás-oldali** kategóriái (`kept / renamed / moved / transformed / quarantined`) és **cél-oldali**
+kategóriái (`new-empty / default-filled`) vannak, ami emberi jóváhagyás nélkül nem aktiválható.
+A dry-run diff a jóváhagyás **tárgya és egyben az aktiválás bemenete**: a diff hordozza
 a bázis content-revíziót és a `(from-templateVersion → to-templateVersion)` párt, és az aktiválás
 **pontosan** a jóváhagyott diff sorait írja — nem újraszámolt eredményt. Ha az aktiválás
 pillanatában a content-revízió vagy bármelyik template-verzió eltér a diffben rögzítettől, az
@@ -1111,8 +1114,8 @@ revízióban landolni, a migráció **nem aktiválható**. Az aktiválás után 
 content-verzió megmarad**, hogy a rollback végrehajtható legyen.
 
 A dry-run diff két részből áll. (a) A **forrás-oldali partíció**: minden tárolt forrásérték —
-`(locale, scopeId, fieldName)` — **pontosan egy** kategóriába kerül a hat közül, és a sora
-felsorolja a rá alkalmazott teljes operátor-láncot. Több operátor esetén a sor a legerősebb
+`(locale, scopeId, fieldName)` — **pontosan egy** kategóriába kerül az **öt forrás-oldali** közül, és
+a sora felsorolja a rá alkalmazott teljes operátor-láncot. Több operátor esetén a sor a legerősebb
 kategóriában jelenik meg (quarantined > transformed > moved > renamed > kept). Egy `merge`
 **nem-cél forrásai** a `quarantined` kategóriába esnek, a cél-forrás a `transformed`-be; a `split`
 forrása `transformed`. (b) A **cél-oldali lista**: azok az új vagy megmaradó slotok, amelyekre
