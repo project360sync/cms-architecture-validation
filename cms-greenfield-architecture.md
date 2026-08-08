@@ -220,10 +220,13 @@ címkével, alapértékkel, validációval. Ez adja a gazdag editor-UI-t + a val
     "editStructure": false
   },
   "capabilities": {
-    "reorderSafe": true,
+    "reorderSafe": true,           // KOMPOZÍCIÓS: a szekció-példány mozgatható/törölhető/duplikálható
     "removalSafe": true,
     "duplicationSafe": true,
-    "reflowSafe": true
+    "reflowSafe": true,
+    "rowAddSafe": true,            // SOR-specifikus — kötött szekciónál KÖTELEZŐ (§3.4)
+    "rowRemoveSafe": true,
+    "rowReorderSafe": true
   },
   "allowNewInstances": true
 }
@@ -248,11 +251,35 @@ sor-permission vagy uniót, vagy metszetet, vagy semmit jelentene — három vé
 válasz ugyanarra a kérdésre, ami az authz-ban nem elfogadható. A normatív hely a `CollectionDoc`
 `permissions` blokkja (§16.1): `editRows`, `addItems`, `removeItems`, `reorderItems`. **Egy
 szekció-kötés önmagában semmilyen sor-jogosultságot nem ad.** A szekció felől csak **szűkítés**
-jöhet, capabilityn keresztül: az editor akkor és csak akkor ajánlja fel a sor-átrendezést, ha a
-kollekció `permissions.reorderItems`-e igaz **és** a kollekcióra kötött **minden** szekció
-`capabilities.reorderSafe`-je igaz — **metszet, nem unió** (§3.4.1); ugyanígy a felvételre
-`duplicationSafe`, a törlésre `removalSafe`. Így a §5 szerveroldali elutasítása is
+jöhet, capabilityn keresztül — **metszet, nem unió** (§3.4.1). Így a §5 szerveroldali elutasítása is
 **végrehajtható**: van **egy** policy, amit konzultálni lehet, és az a kollekcióé.
+
+**A szűkítő capabilityk SOR-specifikusak, nem a kompozíciós capabilityk újrahasznosítva.** A
+`reorderSafe` / `removalSafe` / `duplicationSafe` **szekció-kompozíciós** állítás: arról szól, hogy
+a szekció-példány mozgatható, törölhető, duplikálható-e az oldalon. Ezeket sor-műveleti kapuként
+használni **kategória-váltás** — egy hero lehet `duplicationSafe: false` (mert két hero-példány
+animációja ütközne), miközben a benne renderelt kollekcióhoz sort felvenni tökéletesen biztonságos.
+Ezért a kollekcióra **kötött** szekció sémája **külön, sor-specifikus** capabilityket deklarál:
+`rowAddSafe`, `rowRemoveSafe`, `rowReorderSafe`. Ezek **kötelező** kulcsok minden `collection`
+kötéssel rendelkező szekció-sémában; hiányuk séma-validációs hiba (`MissingRowCapability`), nem
+hallgatólagos `false` és nem öröklés a kompozíciós párjukból. Az **effektív** sor-képesség
+kötésenként:
+
+```text
+effektív(op) = CollectionDoc.permissions[op]  ÉS  MINDEN kötött szekcióra: szekció.capabilities[rowSafe(op)]
+   ahol rowSafe: addItems→rowAddSafe, removeItems→rowRemoveSafe, reorderItems→rowReorderSafe
+   editRows-nak nincs szekció-oldali szűkítője: a mezőérték szerkesztése nem kompozíciós művelet
+```
+
+**A kötések ÜRES halmaza nem „mindenre igaz".** Ha egy kollekcióra **egyetlen** szekció sem köt (egy
+redesign elvette az utolsó kötést, §16.2.2 (c)), az univerzális kvantifikáció **vákuumosan igaz**
+volna, és a kollekció **teljesen szerkeszthetővé** válna — a fail-closed olvasat az ellenkezője.
+Ezért kimondva: **üres kötés-halmaznál minden effektív sor-képesség `false`**, és a sor-műveletek
+nevesített hibával elutasításra kerülnek (`UnboundCollectionRowEdit`). A sorok **nem vesznek el**:
+olvashatók, exportálhatók, a revíziók megmaradnak (1. és 4. garancia) — csak nem szerkeszthetők,
+mert egyetlen oldal sem rendereli őket, tehát a szerkesztés hatása **sehol nem látszana**. A feloldás
+**látható és emberi**: a kollekciót egy szekcióhoz kötni, vagy exportálni. Az editor a kollekciót
+„nincs kötése — egyetlen oldalon sem jelenik meg" állapottal mutatja.
 
 #### 3.4.1 Permission és capability nem ugyanaz
 
@@ -261,6 +288,23 @@ kollekció `permissions.reorderItems`-e igaz **és** a kollekcióra kötött **m
   kompozíciós/reflow műveleteket viseli el; ezt automata és vizuális teszt igazolja.
 - A permission sosem lehet tágabb a capabilitynél. A manifest fordítása hibával leáll,
   ha például `moveSection: true`, de `reorderSafe: false`.
+- **A SOR-permissionöknél a fordítás-idejű ellenőrzésnek nincs mit megnéznie, ezért máshol fut.** A
+  sor-permission a `CollectionDoc`-ban él (§16.1), a capability a szekció-sémában, és a manifest
+  **fordításakor** semmi nem kapcsolja össze a kettőt: a kapcsolat a **kötés**, ami futásidőben áll
+  össze, és a kötések halmaza minden redesignnal változik. Ezért a `permission ≤ capability`
+  ellenőrzés a sor-műveletekre **kötés-feloldáskor** fut — a §16.1 `validateReferences` pontján,
+  tehát **minden publishnál és minden dry-runnál** —, és **nevesített** kimenete van:
+  - **`PermissionExceedsCapability`** — a `CollectionDoc` `permissions` blokkjának **írásakor**
+    elutasítás, ha a beállított jog a **jelenlegi** kötések mellett eleve halott: pl.
+    `permissions.addItems: true` úgy, hogy egy kötött szekció `capabilities.rowAddSafe: false`. Az
+    üzenet a kollekciót **és** a szűkítő szekciót megnevezi. Így a jogosultsági szándék nem
+    csúszhat el némán a valóságtól.
+  - **Redesign okozta szűkítés nem elutasítás, hanem jóváhagyandó diff-sor.** Ha egy redesign visz
+    be új kötést, amelynek sor-capabilityje szűkít, az a §16.2.2 diff (c) részének **kötelező**
+    `permission-delta` sora — nem néma szűkítés és nem publish-blokk. A blokkolás itt rossz válasz
+    volna: az aktiválást az ember hagyja jóvá, és a 3. garancia azt kívánja, hogy **lássa**, ne
+    hogy megakadjon.
+  Ugyanez a séma `removeItems` ⟂ `rowRemoveSafe` és `reorderItems` ⟂ `rowReorderSafe` párokra.
 - `fixed` template-módban a `moveSection`, `removeSection`, `duplicateSection` és
   `allowNewInstances` mindig `false`, a section saját deklarációjától függetlenül.
 - A kliens/AI nem írhat capabilityt. Azt csak template-verziót publikáló developer
@@ -275,7 +319,10 @@ Ez három gyakorlati lockot eredményez, amelyek egymástól függetlenek:
 Egy pozíció-lockolt hero tartalma tehát továbbra is szerkeszthető lehet. Egy lockolt
 sectionön belüli kollekció elemei is lehetnek hozzáadhatók és rendezhetők, miközben maga
 a section nem mozdítható — de a sor-jogosultság forrása ilyenkor is a `CollectionDoc`
-`permissions` blokkja (§3.4, §16.1), a szekció csak a capabilityjével **szűkíthet** rajta.
+`permissions` blokkja (§3.4, §16.1), a szekció csak a **sor-specifikus** capabilityjével
+(`rowAddSafe` / `rowRemoveSafe` / `rowReorderSafe`) **szűkíthet** rajta. Éppen ez a példa mutatja,
+miért nem a kompozíciós capability a helyes kapu: a `duplicationSafe: false` a **szekcióról** szól,
+nem a benne renderelt sorokról.
 
 ---
 
@@ -434,7 +481,11 @@ oszlop-migráció a régi template-verziót rollback-célként megmérgezhette.
   `permissions` blokkja, nem a szekció-séma (§3.4, §16.1). Az editor nem egyetlen `locked`
   flagből következtet.
   A tiltott műveletet nem ajánlja fel, és az API ugyanazt szerveroldalon is elutasítja — sor-műveletnél
-  a **kollekció** policyját konzultálva, a kötött szekciók capabilityjeivel metszve.
+  a **kollekció** policyját konzultálva, a kötött szekciók **sor-specifikus** capabilityjeivel
+  (`rowAddSafe` / `rowRemoveSafe` / `rowReorderSafe`) metszve; **üres kötés-halmaznál a metszet
+  `false`**, nem vákuumosan igaz (`UnboundCollectionRowEdit`, §3.4). A policy maga **nem érhető el a
+  sor-parancsokról**: a `permissions` és a `schema` blokk írása fejlesztői/admin felület, a
+  sor-parancs csak a `rows` tömböt írhatja (`ForbiddenDocumentScope`, §16.1).
   A UI megmutathatja a lock okát (például „a hero animáció miatt nem mozgatható").
 - **Hibrid szerkesztő:**
   - **Inline click-to-edit** a szöveg/kép slotokra (a valódi oldalon kattint).
@@ -1062,10 +1113,29 @@ Identity-szintek (mind explicit, egyik sem pozícióból származtatott):
   `schema.columns` listában, az oszlop-szótár (§16.2.3) **nem címzi**, `renameColumn` /
   `dropColumn` nem hat rá, és sosem kerül quarantine-ba. Hiányzó `locales` = a sor minden locale-ban
   látszik. A lista szerkesztése **sor-életciklus**, azaz hétköznapi szerkesztés.
-- **A sor-jogosultság a `CollectionDoc`-é.** Az `addItems` / `removeItems` / `reorderItems` /
-  `editRows` permission a kollekció saját `permissions` blokkjában él, nem a szekció-sémában (§3.4):
-  egy kollekció több szekcióhoz köthető, és egy szekció-oldali sor-permission uniót, metszetet vagy
-  semmit jelentene — három védhető, de különböző válasz ugyanarra a kérdésre.
+- **A sor-jogosultság a `CollectionDoc`-é — de NEM a kliens által írható felületén.** Az `addItems` /
+  `removeItems` / `reorderItems` / `editRows` permission a kollekció saját `permissions` blokkjában
+  él, nem a szekció-sémában (§3.4): egy kollekció több szekcióhoz köthető, és egy szekció-oldali
+  sor-permission uniót, metszetet vagy semmit jelentene — három védhető, de különböző válasz
+  ugyanarra a kérdésre. **Ez a blokk viszont ugyanabban a dokumentumban ül, amit a kliens naponta
+  ír** (sor-felvétel, -szerkesztés, -átrendezés a `CollectionDoc` revízió-vonalán), ezért az
+  írhatóságot külön ki kell mondani — enélkül a policy a **hívó által írható** helyen ülne. A
+  `CollectionDoc` **két, eltérően írható felületre** bomlik:
+  - **Sor-felület (kliens, AI, editor):** a sor-műveleti parancsok (`addItem`, `removeItem`,
+    `reorderItems`, `editRow`) **kizárólag** a `rows` tömböt írhatják. A `schema`, a `permissions`,
+    a `name` és a `collectionSchemaVersion` **kívül esik az írási felületükön**; az ezekre írást
+    kísérlő parancs **elutasítva** (`ForbiddenDocumentScope`) — nem részlegesen alkalmazva, és
+    **nem** a revision-guardra bízva: a revision-guard a *lost update* ellen véd, nem
+    jogosultság-eszkaláció ellen.
+  - **Fejlesztői/admin felület:** a `permissions` blokkot **kizárólag** az a szerepkör írhatja,
+    amelyik template-verziót publikál és capabilityt deklarál (§3.4.1) — a kliens és a nevében
+    eljáró AI **soha**; ez a §3.4.1 „a kliens/AI nem írhat capabilityt" szabályának pontos párja a
+    sor-oldalon. A `schema` blokkot ugyanez a szerepkör írja, és **csak** jóváhagyott
+    oszlop-migráción keresztül (§16.2.1, §16.2.3), nem közvetlen dokumentum-írással; a `name`
+    immutábilis.
+  Enélkül **egyetlen** sor-hatókörű írás beállíthatná a `permissions.removeItems: true`-t, majd a
+  következő parancs zárolt sorokat törölne — a szerver azt a policyt konzultálná, amit a hívó az
+  imént írt felül.
 
 **Kanonikus váz — `ContentDoc`** (egy oldal, két locale, egy kollekció-kötés):
 
@@ -1431,16 +1501,52 @@ tárolt mezőérték és nem slot. Ezért a diffnek **harmadik, kötés-szintű 
 **akkor sem hagyható el, ha az (a) és a (b) rész üres.** A kötés-szintű rész `(pageId,
 sectionInstanceId)` szinten sorolja fel a **hozzáadott**, a **megszűnt** és az **átirányított**
 kötéseket, mindegyiknél a kollekció nevével (átirányításnál a régi **és** az új névvel), a kollekció
-`collectionSchemaVersion`-jével és az **érintett sorok darabszámával**. A darabszám a `CollectionDoc`
-sémájából és sorszámából olvasódik ki; a kötés-szintű rész **sorértéket sosem olvas és sosem
+`collectionSchemaVersion`-jével, a **pinelt `CollectionDoc`-revízióval** és az **érintett sorok
+darabszámával** (a darabszám pinelt, `StaleMigration`-nel védve — lásd fentebb). A darabszám a
+`CollectionDoc` sémájából és sorszámából olvasódik ki; a kötés-szintű rész **sorértéket sosem olvas és sosem
 jelenít meg** — a „a redesign egyetlen kollekció-értéket sem olvas" állítás az **értékekre**
 vonatkozik, a puszta darabszám nem érték. **Üres kötés-szintű rész csak akkor áll elő, ha a kötések
 halmaza bitre azonos.**
 
+**Minden kötés-szintű sor hordozza a sor-jogosultsági következményt is (`permission-delta`).** A
+rész eddig nevet, séma-verziót és darabszámot sorolt fel — de az **effektív** sor-képesség a
+kollekció `permissions` blokkja és a rá kötött **minden** szekció sor-capabilityjének **metszete**
+(§3.4, §3.4.1), tehát egy **hozzáadott** kötés önmagában, egyetlen érték megváltoztatása nélkül
+**elveheti** az átrendezés vagy a sorfelvétel jogát az egész site-on, és egy **megszűnt** kötés
+vissza is adhatja (üres halmaznál pedig mindent elvesz, §3.4). Ezért minden kötés-szintű sor
+felsorolja az effektív `addItems` / `removeItems` / `reorderItems` / `editRows` halmazt a redesign
+**előtt** és **után**, és megnevezi, **melyik** szekció szűkít. Ha az effektív halmaz változik, ez a
+sor **kötelező** akkor is, ha a kötések halmaza egyébként változatlan lenne (mert a szekció
+capabilityje változott). Enélkül az előnézet nem írja le az aktiválást (3. garancia).
+
 Egy kötés **átirányítása** — ugyanaz a `sectionInstanceId` a régi és az új template-ben, de más
 `collection` név — **explicit manifest-bejegyzést igényel**: `rebindCollection: sectionInstanceId:
 régi-név → új-név`. Manifest-bejegyzés nélküli átirányítás a dry-run szakaszban a **teljes migrációt
-elutasítja** (`UnapprovedRebind`). Az ok a 2. garancia, entitás-szinten: hogy **melyik sorhalmaz
+elutasítja** (`UnapprovedRebind`).
+
+**A bejegyzést a dry-run MINDKÉT template ellen validálja.** A `sectionInstanceId`-ra kulcsolt
+bejegyzés önmagában nem bizonyíték: a dry-run **elutasít** (`UnapprovedRebind`), ha a bejegyzés
+`régi-név`-e nem egyezik azzal, amit a **régi** template ugyanezen a `sectionInstanceId`-n köt, vagy
+az `új-név`-e nem egyezik azzal, amit az **új** template köt. Enélkül egy `termekek → akciok`
+bejegyzés elnyomná az elutasítást egy `termekek → raktar` átirányításnál is, és az ember azt hagyná
+jóvá, ami a papíron áll, nem azt, ami történik (2. garancia).
+
+**A példány-id megváltozása nem kerülő út.** A redesign leggyakoribb műterméke, hogy az
+újragenerált markup **új** `sectionInstanceId`-t ad a szekciónak: a kötés-szintű rész ilyenkor egy
+**megszűnést** és egy **hozzáadást** sorol fel, `rebindCollection` bejegyzés formálisan nem kellene
+— miközben az eredmény pontosan egy átirányítás, és a legelterjedtebb redesign-alak a legkevésbé
+védett. Ezért: ha egy **megszűnt** és egy **hozzáadott** kötés párba állítható — mert a két
+szekció-példány `type`-ja és oldal-szintű mezőhalmaza **azonos** ugyanazon a `pageId`-n, **vagy**
+mert a manifest `move` bejegyzései a régi példány mezőit az újba viszik —, és a két kötés
+**kollekció-neve különbözik**, a dry-run azt **átirányításnak minősíti**, és ugyanúgy **explicit
+`rebindCollection` bejegyzést követel** (`UnapprovedRebind`), a régi **és** az új példány-id
+megnevezésével. Ha a pár kollekció-neve **azonos**, bejegyzés nem kötelező, de a kötés-szintű rész
+**így is** felsorolja a megszűnést és a hozzáadást a darabszámokkal. **Ez nem
+identitás-levezetés:** a párosítás nem hoz létre, nem nevez át és nem mozgat semmit — kizárólag
+**elutasítást vált ki**. A 2. garancia azt tiltja, hogy egyezésből **azonosságot** következtessünk,
+nem azt, hogy egyezésből **gyanút**; a §16.2.2 „az id megváltozása nem vezethető le mezőhalmaz-
+vagy típusegyezésből" mondata ezért érintetlen marad — a `move` bejegyzést továbbra is a fejlesztő
+írja meg. Az ok a 2. garancia, entitás-szinten: hogy **melyik sorhalmaz
 jelenik meg** egy szekcióban, azt **sosem vezetjük le** abból, hogy az új HTML mást ír — pontosan
 úgy, ahogy egy scope átnevezéséhez `move` kell. A `rebindCollection` **nem hetedik operátor**: nem
 mozgat és nem alakít értéket, egyetlen sort sem olvas, ír vagy quarantine-ol — a kötés-változás
