@@ -934,7 +934,7 @@ jobban szolgálja.
 | 5 | **Production baseline: Postgres + object storage; a spike maradhat Mongón.** | A revision, audit, jogosultság, publish pointer és referenciális integritás relációs. JSONB jó verziózott content-snapshotnak, de nem helyettesíti az alkalmazás-sémát. Bináris asset nem adatbázisba kerül. A persistence-migráció nem része a mag-tézist vizsgáló spike-nak (§15.7). |
 | 6 | **Inline a kiválasztás és gyors text/asset edit; panel a teljes, kanonikus űrlap.** | Így az inline élmény nem hoz létre második validációs útvonalat. Strukturált richtext, URL, select, color, boolean, SEO és hibajavítás panelben történik. |
 | 7 | **Agnosztikus a build-outputnál, nem a forrás-frameworknél.** | A bemeneti szerződés renderelt statikus HTML/CSS + támogatott ES bundle + manifest. React/Vue runtime, szerverkomponens vagy tetszőleges app-kód importja már platform/runtime termék lenne. |
-| 8 | **Média immutable asset-id-val kötődik.** | A mező locale-specifikus alt/caption/crop metaadatot, nem fájl-URL-t tárol. Soft delete + reference graph + retention után GC; a re-ingeszt az **oldal-szintű** asset-hivatkozásokat reconciliálja — a kollekció-sorok `assets` bejegyzéseit **nem olvassa és nem írja** (ADR-004, §4.4), azok a `CollectionDoc` saját revízió-vonalán élnek. |
+| 8 | **Média immutable asset-id-val kötődik.** | A mező locale-specifikus alt/caption/crop metaadatot, nem fájl-URL-t tárol. Soft delete + reference graph + retention után GC; a re-ingeszt az **oldal-szintű** asset-hivatkozásokat reconciliálja — a kollekció-sorok `assets` bejegyzéseit **nem olvassa és nem írja** (ADR-004, §4.4), azok a `CollectionDoc` saját revízió-vonalán élnek. **Sor-oldalon a „mező" és az „asset-bejegyzés" munkamegosztását a §16.2.3 asset-bekezdése rögzíti:** `assets[name]` = `assetId` + locale-onkénti `alt`; `fields[locale][name]` = opcionális, locale-scoped prezentációs metaadat (`caption` / `crop` / `focalPoint`), `alt` és `assetId` nélkül. |
 | 9 | **Template-import privilegizált build, content-edit nem kód.** | Külön jogosultság, izolált fetch/unpack/build, külön preview origin; minden content-írás ugyanazon tipizált command API-n megy át. |
 | 10 | **Revision-alapú draft, atomi release pointer.** | V1-ben az autosave kizárólagos edit-lock alatt ír immutable draft revisiont; kollaboratív módban ETag/lost-update kontroll kell. A publish mindkét esetben validált site/locale snapshotot aktivál, nem fájlonként frissíti az élő oldalt. |
 
@@ -1115,6 +1115,8 @@ Identity-szintek (mind explicit, egyik sem pozícióból származtatott):
       // "locales": ["de"],                  // OPCIONÁLIS locale-szűkítés (§14.3) — nem oszlop
       "fields": { "hu": { "title": "Berg Passive", "desc": "Uw=0,66" },
                   "en": { "title": "Berg Passive", "desc": "Uw=0.66" } },
+      // `image` oszlop értéke KÉT félből áll (§16.2.3): az `assets` fél kötelező (assetId + alt),
+      // a `fields[locale][img]` fél opcionális, prezentációs (caption/crop/focalPoint) — itt nincs
       "assets": { "img": { "assetId": "ast_abc", "alt": { "hu": "…", "en": "…" } } } }
   ]
 }
@@ -1132,7 +1134,12 @@ eljárás és az, hogy miért nem körkörös, a **§16.2.4**-ben áll.
 **séma-konformancia**: egy `CollectionDoc` sorai **nem hordozhatnak** olyan kulcsot, ami a doc saját
 `schema.columns` listájában nincs benne — sem `rows[*].fields[locale]`-ben, sem `rows[*].assets`-ben
 —, és a hordozott érték alakja a deklarált típusnak felel meg. (Ez teszi ellenőrizhetővé a §16.2.3
-`dropColumn` kulcs-eltávolítását: „árva" kulcs nem maradhat a sorban.) A kötés
+`dropColumn` kulcs-eltávolítását: „árva" kulcs nem maradhat a sorban. **Amit viszont ez az invariáns
+NEM fog meg:** a `type-changed` és az `impure-columns` okon quarantine-olt érték, mert ott az oszlop
+**neve megmarad** a sémában — azt a §16.2.3 „ami quarantine-ba kerül, az a sorból is kikerül"
+szabálya zárja le, külön kimondva.) `image` típusú oszlopnál a `fields[locale][name]` **és** az
+`assets[name]` bejegyzés ugyanannak az **egy** oszlopnak a két fele, tartalmilag elhatárolva
+(§16.2.3); a `fields` fél hiánya nem konformancia-hiba. A kötés
 integritása **entitás-határon átnyúló**, ezért külön kimondva: minden `sections[*].collection` név
 létező `CollectionDoc`-ra mutat ugyanazon a `siteId`-n, a `(siteId, name)` párra **pontosan egy**
 `CollectionDoc` létezik (kollekciónként egy, **nem kötésenként** egy — §4.1), és a szekció-séma `requires` oszloplistája
@@ -1592,6 +1599,18 @@ sem előbb, sem utóbb (§16.2.1).
 a manifest **explicit** alapértéket ad. Az implementáció **sosem talál ki alapértéket** (üres string
 sem alapérték).
 
+**Az alapértéket a dry-run a CÉLOSZLOP típusa ellen validálja (`InvalidColumnDefault`).** Az
+oldal-hatökörben ez ki van mondva („a cél mezőtípusának el kell fogadnia az értéket", §16.2.2), az
+oszlop-hatökörön eddig **nem volt** — pedig itt **több** múlik rajta: a `RequiredWithoutDefault`
+záró-ellenőrzése **négyből három** publikálhatatlansági utat éppen az **alapértékre támaszkodva**
+enged át. Ezért: a dry-run **elutasítja a teljes migrációt**, ha egy manifest-alapértéket a
+céloszlop típus-validátora nem fogad el — beleértve azt is, hogy `image` oszlopnál az alapérték
+`assetId`-t **ad** (létező assetre), `altRequired: true` mellett pedig **minden publikálandó
+locale-ra** `alt`-ot. Ez **nem** hagyható a §16.1 séma-konformancia invariánsára: az az **írás**
+eredményét validálja, tehát aktiválás-idejű; egy típusidegen alapérték addigra már **kimenekülési
+útnak látszott** a záró-ellenőrzés előtt, és az eredmény vagy invalid dokumentum, vagy — ha az írás
+mégis átmegy — pontosan az a publikálhatatlan sor, amit a záró-ellenőrzés kizárni hivatott.
+
 **Publikálhatósági záró-ellenőrzés (`RequiredWithoutDefault`) — a szakasz harmadik kötelező
 elutasítása.** Az az ígéret, hogy „sor nem kerülhet migráció miatt publikálásból kizárt állapotba",
 **nem** egy új oszlopra szóló mellékfeltétel: **négy** út vezet oda, és mind a négyet ugyanez az
@@ -1619,25 +1638,77 @@ kötelező:** enélkül a draft-quarantine megszüntetésének (c) premisszája 
 kötelező érték publikálás-blokkolása a §14.2 dolga — nem állna, mert a §14.2 önmagában csak
 `ContentDoc`-alakú mezőkről beszélne.
 
-**A `dropColumn` a kulcsot is elviszi.** A „nem hard-törlés" **az értékre** vonatkozik: az érték a
-quarantine-rekordban él tovább. A **sorokban** viszont a `dropColumn` ugyanabban a revízióban
-**eltávolítja a kulcsot** minden sor minden locale-jából (és `image` oszlopnál az `assets`
-bejegyzést is). Enélkül egy hónapokkal későbbi, **azonos nevű új** oszlop — amit a cél-oldali lista
-`new-empty`-ként ír le — a régi szövegeket **feltámasztaná** az előnézet ellenében (3. garancia), és
-a foglaltság-predikátum jelentése is némán megváltozna. A megmaradt kulcs egyébként is sértené a
-§16.1 séma-konformancia invariánsát.
+**Ami quarantine-ba kerül, az a sorból is kikerül — MIND A NÉGY okon.** A „nem hard-törlés" **az
+értékre** vonatkozik: az érték a quarantine-rekordban él tovább. A **sorokban** viszont az az érték,
+amely quarantine-ba került, **ugyanabban a revízióban eltűnik**: a kulcs kikerül minden sor minden
+locale-jából (és `image` oszlopnál az `assets` bejegyzés is, lásd az asset-bekezdést). Ez **nem** a
+`dropColumn` sajátossága — az csak a legláthatóbb esete —, hanem szabály **minden** quarantine-okra,
+és okonként külön kimondva, mert a mulasztás következménye okonként **más**:
 
-**Asset-oszlopok — egy oszlop értéke két helyen áll.** Egy `image` típusú oszlop **értéke** a
-`rows[*].fields[locale][name]` bejegyzés **és** a `rows[*].assets[name]` bejegyzés (`assetId` +
-locale-onkénti `alt`) **együtt**; a szótár szabályai az **egészre** vonatkoznak. Ebből:
+| Ok | A kulcs sorsa | Miért, és mi fogná meg különben |
+|---|---|---|
+| `dropped` (`dropColumn`) | kikerül a sorból | az oszlop az új sémában **nincs**; a maradék kulcs a §16.1 séma-konformancia invariánsát is sértené |
+| `orphan` (tiszta törlés, néma manifest) | kikerül a sorból | ugyanaz: az oszlop az új sémában **nincs** |
+| `type-changed` | **kikerül a sorból**, holott az oszlop **neve megmarad** az új sémában | a diff azt ígéri, hogy az oszlop „a migráció után **érték nélkül** áll"; ha a régi érték a sorban marad, az oszlop **nem** áll érték nélkül, és ha az **új** típus véletlenül elfogadja a régi alakot (`text` → `longtext`), a site **tovább rendereli** azt, amiről az előnézet azt mondta, hogy eltűnik (3. garancia). A §16.1 invariáns **nem** fogja meg: a név benne van a `schema.columns` listában, tehát „árva kulcs" nem keletkezik |
+| `impure-columns` | **kikerül a sorból**, holott az oszlop **neve megmarad** az új sémában | a fedezetlen oszlop `new-empty`-ként áll elő a cél-oldali listán; ha a kulcs a sorban marad, az érték **kétszer** létezik — a rekordban **és** a sorban —, és a §16.1 invariáns itt sem fogja meg, ugyanabból az okból |
+
+Az utolsó két sor az, amiért ezt a szabályt **külön** ki kell mondani, és amiért nem elég a
+`dropColumn` cellájára hagyatkozni: ott a név **megmarad** a sémában, tehát a §16.1
+séma-konformancia invariánsa **hallgat**. Egy implementáció, amely a `type-changed` vagy
+`impure-columns` értékeket a sorban hagyja, **szerződést szeg** — kétszer létező érték, és az
+előnézet nem írja le az aktiválást.
+
+**A megfordítása is áll, és ez a zárás másik fele: ami a sorból kikerül, az quarantine-ba kerül.**
+Nincs olyan út, amelyen egy érték kulcsostul eltűnik anélkül, hogy érték-hordozó rekordot hagyna
+(1. garancia). A `renameColumn` **nem** kivétel: ott az érték nem tűnik el, hanem **átköltözik** a
+céloszlopba, és a forrás-kulcs eltávolítása a költözés befejezése — a (B) szabály „ugyanaz az érték
+nem maradhat két oszlopban" mondata ugyanennek az érmének a másik oldala.
+
+Enélkül egy hónapokkal későbbi, **azonos nevű új** oszlop — amit a cél-oldali lista `new-empty`-ként
+ír le — a régi szövegeket **feltámasztaná** az előnézet ellenében (3. garancia), és a
+jelenlét-predikátum jelentése is némán megváltozna.
+
+**Asset-oszlopok — egy oszlop értéke két helyen áll, és MINDKÉT hely definiált.** Egy `image` típusú
+oszlop **értéke** a `rows[*].fields[locale][name]` bejegyzés **és** a `rows[*].assets[name]`
+bejegyzés **együtt**; a szótár szabályai az **egészre** vonatkoznak. Ahhoz, hogy ez a mondat ne
+legyen üres, ki kell mondani, **mit tartalmaz a két fél** — a korábbi szöveg ezt nyitva hagyta, és
+három, egymással összeférhetetlen olvasatot engedett (a §16.1 példája szerint a `fields` fél
+**nincs**, a §14.2 szerint az `alt` az `assets`-en át jön, a §15.5 #8 szerint a **mező** hordoz
+locale-specifikus alt/caption/crop metaadatot):
+
+- **`assets[name]` — a locale-független fél:** `assetId` és a locale-onkénti `alt` szótár
+  (`alt: { hu, en }`). Ez a fél **kötelező**, ha az oszlop értéket hordoz: `assetId` nélkül nincs
+  kép.
+- **`fields[locale][name]` — az opcionális, locale-scoped fél:** prezentációs metaadat az adott sor
+  adott locale-jára (`caption`, `crop`, `focalPoint`) — ez az, amit a §15.5 #8 „locale-specifikus
+  alt/caption/crop metaadat"-ként nevez meg. **Fájl-URL-t és `assetId`-t sosem tartalmaz.** Hiánya
+  **nem hiba**: a §16.1 kanonikus példája éppen azt a — gyakori — sort mutatja, amelynek nincs
+  prezentációs metaadata. Ha az `alt` **itt is** meg van adva egy locale-ra, az **hiba**
+  (`AmbiguousAssetValue`): az `alt` normatív helye az `assets[name].alt`, és két hely két igazságot
+  jelentene.
+
+Ebből:
 
 - a `renameColumn` **mindkettőt** átnevezi — a `fields` kulcsot minden locale-ban **és** az `assets`
   kulcsot. Csak az egyiket átnevezni **szerződésszegés**, nem részleges siker;
-- a `dropColumn` **mindkettőt** elviszi, és soronként **egyetlen** quarantine-rekordot ír, amelynek
-  `locale` mezője `null` (az `assetId` locale-független), nyers értéke pedig a **teljes**
-  `{ assetId, alt: { … } }` objektum — az `alt` szövegek locale-onként **ebben az egy** rekordban
-  utaznak. Locale-onkénti asset-rekord **nincs**;
-- a foglaltság-predikátum egy asset-oszlopnál az `assets[name]` bejegyzés **létezését** jelenti;
+- a `dropColumn` (és minden más quarantine-ok) **mindkettőt** elviszi, és soronként **egyetlen**
+  quarantine-rekordot ír, amelynek `locale` mezője `null`, nyers értéke pedig a **teljes pár**:
+  `{ asset: { assetId, alt: { … } }, fields: { hu: { caption, crop }, en: { … } } }`. Az `alt`
+  szövegek **és** a locale-onkénti prezentációs metaadatok **ebben az egy** rekordban utaznak;
+  locale-onkénti asset-rekord **nincs**. A `locale: null` **nem** azt jelenti, hogy a rekord
+  locale-független adatot hordoz, hanem hogy **minden** locale adatát hordozza. Egy olyan rekord,
+  amely csak az `assets` felét hordozza, az 1. garancia szempontjából **érték nélküli rekordnak
+  számít**, és a migráció nem aktiválható vele — enélkül egy `dropColumn` a locale-onkénti
+  caption/crop metaadatokat **rekord nélkül** törölné;
+- a **jelenlét-predikátum** egy asset-oszlopnál a két fél **diszjunkciója**: az oszlop akkor
+  foglalt, ha **az `assets[name]` bejegyzés létezik, VAGY bármely locale-ban létezik a
+  `fields[locale][name]` bejegyzés**. Csak az `assets` felét tesztelni **hiba**: egy sor, amelynek
+  az `assets.img`-je törölve lett, de a `fields.hu.img` caption-je él, „nem foglaltnak" látszana, és
+  egy `renameColumn` **némán felülírná** — pontosan az a vak felülírás, amit ez a szakasz kizár;
+- ugyanez a diszjunkció áll a `RequiredWithoutDefault` záró-ellenőrzésében is, azzal a
+  szigorítással, hogy egy `required: true` `image` oszlopnál a **`assetId` megléte** a követelmény
+  (prezentációs metaadat önmagában **nem** elégíti ki), `altRequired: true`-nál pedig **minden
+  publikálandó locale-ban** kell `alt`;
 - az `altRequired` **a `required`-del azonos elbírálás alá esik** a fenti záró-ellenőrzésben. Az
   `altRequired: false → true` váltás tehát nem láthatatlan a szabályok számára — a régi szöveg
   éppen ezt az esetet nevesítette.
