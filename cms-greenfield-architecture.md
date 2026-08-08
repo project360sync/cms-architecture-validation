@@ -1274,7 +1274,49 @@ Egy elutasított migráció **nem olvas sorokat.** (A korábbi szöveg alatt a *
 | `dropColumn` | `(c, a) → quarantine`; az oszlop minden értéke rekordba kerül, nem hard-törlés | ha `a` nincs a régi sémában; ha `a` **benne van** az új sémában (akkor nem eltűnés, a bejegyzés hazudik); ha a quarantine nem tud ugyanabban a revízióban landolni |
 
 A két operátor neve **szándékosan különbözik** az oldal-hatókör `rename`/`delete` operátoraitól: nem
-ugyanazok, nem cserélhetők fel, és nem szabad közös implementációt feltételezni közöttük.
+ugyanazok, nem cserélhetők fel, és nem szabad közös **implementációt** feltételezni közöttük.
+
+**Ez az operátorokra vonatkozik, nem a szabályokra.** Az alábbi négy szabály az oldal-hatókörből
+(§16.2.2) **változatlan tartalommal**, oszlop-szinten **újra kimondva** kötelező. Nem hivatkozás:
+itt állnak, és itt kell teljesíteni őket. Egy implementáció, amely azzal érvel, hogy „ez a §16.2.2
+szabálya, a §16.2.3 nem mondja ki", ezt a szakaszt sérti meg.
+
+**(A) Egyidejűség — egyetlen, migráció előtti pillanatkép fölött.** A manifest bejegyzései
+**egyidejűleg** értékelődnek ki, nem egymás után sorrendben: minden bejegyzés forrása a migráció
+**előtti** oszlopérték, és egyetlen bejegyzés sem látja másik bejegyzés kimenetét. Egy
+`renameColumn: (c,a) → (c,b)` és egy `renameColumn: (c,b) → (c,c)` pár tehát azt jelenti, hogy `b` a
+**régi** `a` értékét kapja, `c` pedig a **régi** `b` értékét — nem az imént beírt `a`-t. Egy
+implementáció, amely a bejegyzéseket sorrendben, egymás kimenetére alkalmazza, `b` eredeti értékét
+minden sorban elveszti: ez **nem** quarantine-eset, amire ok-kód járna, hanem **szerződésszegés**.
+Két bejegyzés, amely ugyanarra a céloszlopra ír, **ütközés** → a dry-run elutasít
+(`ColumnTargetConflict`).
+
+**(B) Pontosan egy forrás-oldali kategória, precedenciával; a manifest mindig nyer.** Minden, a
+migráció **előtti** sémában létező oszlop **pontosan egy** forrás-oldali kategóriába kerül:
+`kept | renamed | quarantined`. Ha egy oszlopra több szabály illeszkedne, a sor a **legerősebb**
+kategóriában jelenik meg (`quarantined > renamed > kept`). Az explicit manifest **mindig nyer**; az
+automatikus név-egyezés csak a **maradékot** viszi tovább — azokat az oszlopokat, amelyeknek **neve
+ÉS típusa** változatlan, **és** amelyeket a manifest **egyetlen bejegyzése sem érint sem forrásként,
+sem célként** (és amelyekre a lenti tiszta-oszlophalmaz szabály nem tiltotta le az auto-matchet).
+Manifest-fedett oszlop tehát **nem lehet** egyszerre auto-match maradék is: az „egyszerre `kept` és
+`renamed`" olvasat kizárt. **Fogyasztásnak kizárólag** valamely manifest-bejegyzés
+**forrás-hivatkozása** számít; az auto-match által továbbvitt érték **nem** fogyasztott, így az őt
+célzó manifest-bejegyzés helyesen a foglaltság miatt elutasításra kerül. A `renameColumn` a
+**forrásoszlopát kiüríti**: a művelet után `(c,a)` az új sémában vagy nem létezik, vagy
+`new-empty`-ként áll elő a cél-oldali listán — ugyanaz az érték **nem maradhat két oszlopban.**
+
+**(C) Pontosan egy verzió-lépés; az auto-match nem hidal át verzió-távolságot.** A manifest a
+`(collectionName, from-collectionSchemaVersion → to-collectionSchemaVersion)` hármasra van kulcsolva.
+Ha a `CollectionDoc` aktuális `collectionSchemaVersion`-je és a cél-séma verziója között **nem
+pontosan egy lépés** van, vagy az adott lépéshez nincs manifest, a dry-run **elutasít**
+(`UnbridgedCollectionVersionGap`). Egy `1 → 5` migráció négy, emberi jóváhagyás nélkül átugrott
+séma-generációt jelentene; az auto-match **verzió-távolságot nem hidalhat át.** A több lépés
+**egyenként** fut, saját dry-runnal, saját jóváhagyással és saját revízióval.
+
+**(D) Bármely kötelező elutasítás a TELJES migrációt elutasítja.** A szakasz minden kötelező
+elutasítása — az operátor-táblázat celláitól a `RequiredWithoutDefault`-on át az (A)–(C) pontokig és
+a lentebb nevesítettekig — a **dry-run szakaszban**, a **teljes** migrációra hat, nem csak az
+érintett oszlopra. Nincs részleges migráció, és nincs „a többi bejegyzés azért lefut". Fail-closed.
 
 **Automatikus egyeztetés és a tiszta oszlophalmaz szabálya.** A maradékot ugyanaz az elv viszi
 tovább, mint az oldal-hatókörben: az az oszlop, amelynek **neve ÉS típusa változatlan.** Ha a
