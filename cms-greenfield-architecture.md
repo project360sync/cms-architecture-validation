@@ -94,10 +94,10 @@ csak a jelölt részek nyílnak meg.
   <svg class="hero__drawing">…</svg>               <!-- jelöletlen → ZÁROLT (GSAP rajzolja) -->
 </section>
 
-<!-- Kollekció: a kliens elemet vehet fel / szerkeszthet / rendezhet át -->
+<!-- Kollekció-KÖTÉS: a sorok nem itt élnek, a template csak hivatkozik rájuk -->
 <section data-cms-section-id="products-1" data-cms-section-type="products">
-  <div class="pgrid" data-cms-collection="items">
-    <template data-cms-item>                        <!-- a fejlesztő ITEM-SABLONJA -->
+  <div class="pgrid" data-cms-collection="termekek">
+    <template data-cms-item>                        <!-- SOR-SABLON: render, nem séma -->
       <a class="pitem">
         <img data-cms-field="img" width="800" height="600">
         <span data-cms-field="title"></span>
@@ -118,8 +118,13 @@ Attribútumok:
   típusból több példány is lehet, ezért a típus önmagában nem használható render-célpontként.
 - `data-cms-field="<name>"` — nevesített tartalom-slot; a típusa a sémából jön (vagy
   elemből infered: `<img>` → image, egyébként text).
-- `data-cms-collection="<name>"` — ismétlődő régió; benne egy `<template data-cms-item>`
-  prototípus (a fejlesztő egy elemet ír meg); minden elem = egy tipizált **sor**.
+- `data-cms-collection="<name>"` — ismétlődő régió; a `<name>` egy **létező kollekcióra
+  hivatkozik**, nem definiál újat (ADR-004, §16.1). Benne egy `<template data-cms-item>`
+  prototípus (a fejlesztő egy elemet ír meg); a benne lévő `data-cms-field` nevek a kollekció
+  **oszlopaira** hivatkoznak. A sorok sémáját tehát **nem** ez a markup határozza meg: a séma a
+  `CollectionDoc`-ban él, a szekció-séma pedig `requires`-szel mondja meg, mely oszlopokra van
+  szüksége a rendereléshez (§3.4). Nem létező kollekció-név vagy hiányzó oszlop → a publish és a
+  dry-run fail-closed hibája (`UnboundCollection` / `UnsatisfiedBinding`).
 - `data-cms-editable="locked|content|collection"` — opcionális, durva authoring-hint.
   Nem ez a jogosultság forrása: a normatív, granularis permission/capability policy a
   verziózott section-manifestben él (§3.4).
@@ -149,17 +154,14 @@ tipizált **settingekkel** és **blokkokkal**. Ez kódolja a tartalmat ÉS a kli
       "gallery-1":  { "type": "gallery",
                       "blocks": [ { "type": "gcard", "settings": { "img": "/a/…", "cap": "…" } } ] }
     }
-  },
-  "collections": {
-    "termekek": [
-      { "id": "itm_7f3a", "fields": { "title": "Berg Passive", "desc": "Uw=0,66",
-                                      "img": { "assetId": "ast_abc", "alt": "Berg Passive ablak" } } },
-      { "id": "itm_9c22", "fields": { "title": "AWS 75.SI+",  "desc": "75 mm",
-                                      "img": { "assetId": "ast_def", "alt": "AWS 75.SI+ ablak" } } }
-    ]
   }
+  // A kollekció SORAI nem ebben a dokumentumban élnek — csak a `collection` KÖTÉS van itt.
 }
 ```
+
+**Ez a példa illusztratív, és a §16.1 felülírja.** Két ponton lényeges: a `collections` kulcs
+**nincs** a tartalom-docban (ADR-004 — a sorok önálló `CollectionDoc`-ban, saját revízió-vonalon
+élnek), és a mezőidentitás kvalifikált `(scopeId, fieldName)` pár.
 
 - **Bespoke oldal (vibor):** a `order` fix (a fejlesztő adja), a kliens csak a settingeket
   + a kollekciókat szerkeszti → a GSAP DOM-ja stabil marad.
@@ -201,14 +203,15 @@ címkével, alapértékkel, validációval. Ez adja a gazdag editor-UI-t + a val
 ```
 
 ```jsonc
-// sections/products.schema.json — kollekció-szekció
+// sections/products.schema.json — kollekcióra KÖTÖTT szekció
 {
   "type": "products", "label": "Termékek",
-  "item": {                        // az item-sablon mezői
-    "fields": [
-      { "id": "img",   "type": "image",    "label": "Kép", "altRequired": true },
-      { "id": "title", "type": "text",     "label": "Név" },
-      { "id": "desc",  "type": "longtext", "label": "Leírás" }
+  "collection": {                  // KÖTÉS + KÖVETELMÉNY — nem séma-definíció
+    "binding": "termekek",         // melyik kollekciót rendereli
+    "requires": [                  // mely oszlopok kellenek a rendereléshez, milyen típussal
+      { "name": "img",   "type": "image"    },
+      { "name": "title", "type": "text"     },
+      { "name": "desc",  "type": "longtext" }
     ]
   },
   "permissions": {
@@ -232,6 +235,15 @@ címkével, alapértékkel, validációval. Ez adja a gazdag editor-UI-t + a val
 
 **Mező-típusok** (kezdő halmaz): `text`, `longtext`, `richtext`, `image`, `url`, `select`,
 `color`, `number`, `boolean`. Mindegyikhez validáció (max hossz, enum, kötelező).
+
+**A szekció-séma nem definiálja a kollekció sorait (ADR-004).** A `collection.requires` lista
+**követelmény**, nem definíció: azt mondja meg, mire van szüksége a rendereléshez, nem azt, hogy a
+sor miből áll. A sorok oszlopait, típusait és `required`-ségét a `CollectionDoc` sémája hordozza
+(§16.1), és a kollekció **több szekcióhoz** is köthető, akár eltérő `requires` listával. Egy
+kielégítetlen követelmény vagy egy nem létező kötés a publish és a re-ingeszt dry-run **fail-closed**
+hibája (`UnsatisfiedBinding` / `UnboundCollection`, §16.2.1); az implementáció **sosem** hoz létre
+hiányzó oszlopot a szekció-sémából. A kollekció sémájának módosítása külön migráció, saját szűk
+szótárral (§16.2.3).
 
 #### 3.4.1 Permission és capability nem ugyanaz
 
@@ -268,11 +280,18 @@ tartalom-doc** (a slotokból kiolvasott értékek). Innentől a **tartalom-store
 ```text
 importSite(html, assets, js):
   1. sanitize (inline <script>/on* ki; engedélyezett dependency-k vendorizálva és hash-elve)
-  2. a data-cms-* markerekből kiolvassa a slotokat/kollekciókat/szekciókat
+  2. a data-cms-* markerekből kiolvassa a slotokat/kollekció-kötéseket/szekciókat
   3. template  := struktúra (slotok üres/prototípus formában) + CSS + JS-bundle
-  4. content   := a jelenlegi értékek kiolvasva a slotokból (fields + collections)
-  → tárolás: template (verziózva) + content (névre kulcsolva)
+  4. content   := a jelenlegi oldal-szintű értékek kiolvasva a slotokból (fields)
+  5. collections := kötésenként EGY CollectionDoc — séma az item-sablonból + `requires`-ből,
+                    sorok a markupban talált ismétlődésekből (BOOTSTRAP, egyszeri)
+  → tárolás: template (verziózva) + content (névre kulcsolva) + CollectionDoc-ok (külön entitás)
 ```
+
+Az 5. lépés az onboarding **egyetlen** olyan pontja, ahol egy kollekció sémája a designer HTML-jéből
+származik — ez a bootstrap, nem szabály (ADR-004). Innentől a kollekció sémája **önálló**, és a
+re-ingeszt nem írja (§16.2.2). A meglévő, `schemaVersion: 3`-as adat ugyanennek a bootstrapnek az
+utólagos, azonosító-megőrző párja: a §16.2.4 séma-lift.
 
 ### 4.2 Render / merge (a JS a strukturán fut)
 
@@ -287,8 +306,8 @@ Két render-mód kell, és a template manifestje dönti el, melyik érvényes:
   mount-pointba fűzi.
 
 ```ts
-function render(template, content): Html {
-  validateReferences(template.manifest, content)
+function render(template, content, collections): Html {
+  validateReferences(template.manifest, content, collections)  // kötések + `requires` (§16.1)
   const doc = load(template.shell)
   const mount = template.mode === "composable"
     ? exactlyOne(doc, "[data-cms-page-sections]")
@@ -301,7 +320,7 @@ function render(template, content): Html {
     const root = template.mode === "fixed"
       ? takeFixedInstance(doc, secId, sec.type)
       : instantiateSection(template.registry, secId, sec.type)
-    hydrateTyped(root, sec, content.collections, template.schemas)
+    hydrateTyped(root, sec, resolveBinding(collections, sec.collection), template.schemas)
     if (template.mode === "composable") mount.append(root)
   }
 
@@ -312,9 +331,11 @@ function render(template, content): Html {
 ```
 
 A kollekció-render ugyanezt a szabályt követi: a `<template data-cms-item>` **contentjét**
-klónozza (nem magát a `<template>` elemet), minden sorhoz stabil item-id-t köt, validálja
-a mezők egyediségét/sémáját, majd eltávolítja a prototípust. Hiányzó vagy duplikált
-section-, block-, collection- vagy field-id esetén a publish hibával leáll.
+klónozza (nem magát a `<template>` elemet) a **kötött kollekció** minden sorára, a sor saját,
+tárolt `itemId`-jával (a rendererben id nem keletkezik), validálja a mezőket a kollekció sémája
+ellen, majd eltávolítja a prototípust. Hiányzó vagy duplikált section-, block-, collection- vagy
+field-id esetén a publish hibával leáll; feloldatlan kötés (`UnboundCollection`) vagy kielégítetlen
+`requires` (`UnsatisfiedBinding`) esetén szintén.
 
 A tipizált renderer **kontextus szerint kódol és validál**: a sima szöveg csak
 `textContent`, a rich text egy sémázott dokumentum-AST-ből, mezőnként engedélyezett
@@ -350,8 +371,13 @@ reingest(newHtml):
   for (const [name, value] of content.fields)
     nextTemplate.hasSlot(name) ? keep(name, value)   // a slot még létezik → megtartjuk
                                : quarantine(name)      // eltűnt → jelöljük, nem dobjuk némán
-  collections változatlan (a szekcióhoz névvel kötve)
+  a kollekciók ÉRINTETLENEK — a re-ingeszt egyetlen sort sem olvas és nem ír (ADR-004)
 ```
+
+**A re-ingeszt nem nyúl a sorokhoz.** A kollekció önálló entitás, saját sémával és saját
+revízió-vonallal (§16.1); a redesign csak a **kötést** és a szekció `requires` listáját érinti.
+Feloldatlan kötés vagy kielégítetlen oszlop-követelmény a dry-run fail-closed hibája — nem néma
+átalakítás, és nem is automatikus séma-változás a sorokon (§16.2.1).
 
 **Nincs id-drift, nincs vak felülírás.** A slot átnevezése/törlése = kontrollált, jelzett
 migráció (nem néma adatvesztés). A név-egyeztetés csak az automatikus alapértelmezés:
@@ -602,15 +628,15 @@ A template a slotokat névvel deklarálja (locale-független). A tartalom locale
   "content": {
     "hu": { "fields": { "hero.line1": "FÉM." },   "template": { "order": ["hero-1","products-1"] } },
     "en": { "fields": { "hero.line1": "METAL." }, "template": { "order": ["hero-1","products-1"] } }
-  },
-  "collections": {
-    "termekek": [
-      { "id": "itm_7f3a",
-        "fields": { "hu": { "title": "Berg Passive" }, "en": { "title": "Berg Passive" } } }
-    ]
   }
+  // a kollekció-sorok külön entitásban, locale-onkénti mezőértékekkel — lásd §16.1
 }
 ```
+
+**Ez a példa illusztratív, és a §16.1 felülírja** két ponton: a lapos `hero.line1` kulcs hibás
+(kvalifikált `(scopeId, fieldName)` pár kell), és a `collections` kulcs **nincs** a
+tartalom-docban — a sorok önálló `CollectionDoc`-ban élnek (ADR-004). A locale-dimenzió maga
+változatlan: a sor `fields`-e locale-onkénti, az `itemId` és az oszlopnév nem.
 
 A render **locale-onként egyszer** fut → `/hu/…`, `/en/…` statikus fák. **Egy struktúra, N kimenet.**
 
@@ -643,6 +669,11 @@ fordítás **stale**, és a policy dönti el, hogy blokkolja-e a locale publiká
 Az elemek **stabil `id`-t** osztanak a locale-ok közt (a `7f3a` *ugyanaz* a termék),
 és csak a **mezők** locale-onkéntiek → a fordítás elemenként/mezőnként követhető.
 Locale-specifikus elem (csak DE-ben promó) = opcionális `locales: ["de"]` flag — a kivétel.
+
+Ez a szabály **változatlan** azzal, hogy a sorok kikerültek a template alól (ADR-004): a
+`CollectionDoc` `rows[*].fields` blokkja locale-onkénti, az **oszlopnév** viszont struktúra, tehát
+locale-független (§16.1). Ebből következik a §16.2.3 költségmodellje: egy oszlop-szabály
+kiértékelése **sem** a sorok, **sem** a locale-ok számával nem szorzódik.
 
 ### 14.4 Struktúra per-locale
 
@@ -938,37 +969,47 @@ Identity-szintek (mind explicit, egyik sem pozícióból származtatott):
 | section-instance | `sectionInstanceId` | page-en belül | `hero-1` |
 | block | `blockId` | section-instance-en belül | `blk_9f2` |
 | collection | `collectionName` | site-on belül | `termekek` |
-| collection-item | `itemId` | collection-on belül | `itm_7f3a` |
+| collection-item (sor) | `itemId` | collection-on belül | `itm_7f3a` |
+| collection-column (oszlop) | `(collectionName, fieldName)` | site-on belül | `(termekek, title)` |
 | field | `(scopeId, fieldName)` | scope-on belül | `(hero-1, line1)` |
 
 **Kulcs-invariánsok:**
-- **A mező sosem a típusra kulcsol.** A mezőidentitás mindig `(scopeId, fieldName)`, ahol a scope
-  egy section-instance, block vagy collection-item. A DOM-annotáció a **csupasz** nevet hordozza
+- **A kollekció nem a template alatt él (ADR-004).** Egy kollekciónak **saját, stabil sémája** van,
+  amit nem a designer HTML-je határoz meg; a template **hivatkozik** egy kollekcióra (`collection`
+  kötés a szekción), nem **definiálja** azt. Ebből következik a `ContentDoc` alakja alább: a
+  `collections` kulcs **kikerült** belőle, és a sorok önálló entitásban, `CollectionDoc`-onként,
+  **saját revízió-vonalon** élnek. Egy redesign ezért nem séma-változás a sorokon.
+- **A mező sosem a típusra kulcsol.** Az oldal-szintű mezőidentitás mindig `(scopeId, fieldName)`,
+  ahol a scope egy section-instance vagy egy block. A DOM-annotáció a **csupasz** nevet hordozza
   (`data-cms-field="line1"`), a renderer/reconciler a befoglaló `data-cms-section-id` /
-  `data-cms-item` / block-scope alapján kvalifikálja. Ez feloldja a §3.2 (csupasz) ⟂ §10
+  block-scope alapján kvalifikálja. Ez feloldja a §3.2 (csupasz) ⟂ §10
   (`hero.line1`) annotáció-ellentmondást is: a helyes annotáció a **csupasz** név.
+- **A sor-érték identitása `(collectionName, itemId, locale, fieldName)`.** A `collection-item`
+  továbbra is **identitás-szint** — a sornak stabil `itemId`-ja van —, de **nem** migrációs
+  operátor-hatókör: a kollekció-oldali migráció hatóköre az **oszlop** (§16.2.3).
 - **A blokknak stabil `id`-ja van** (`{ "id":"blk_9f2", "type":"gcard", "settings":{…} }`), nem
   tömb-index — enélkül pozíció-horgonyzott lenne, épp az a törékenység, ami ellen a modell érvel (§8).
-- **A struktúra (order / type / collection-referencia) locale-független; csak a mezőértékek
+- **A struktúra (order / type / collection-kötés / oszlopnév) locale-független; csak a mezőértékek
   locale-scoped-ek.** Kivétel a `composable` per-locale order (§14.4): külön, opcionális felülírás —
   nem az alap.
 
-**Kanonikus váz** (egy oldal, két locale, egy kollekció):
+**Kanonikus váz — `ContentDoc`** (egy oldal, két locale, egy kollekció-kötés):
 
 ```jsonc
 {
-  "schemaVersion": 2,
+  "schemaVersion": 4,                        // 4 = a `collections` kulcs nélküli alak (§16.2.4)
   "siteId": "site_v1b0r",
   "defaultLocale": "hu",
   "locales": ["hu", "en"],
   "pages": {
     "home": {
+      "templateVersion": "tpl_12",           // a reconciliation kulcsának egyik fele (§16.2.2)
       "template": {                          // STRUKTÚRA — locale-független
         "mode": "fixed",
         "order": ["hero-1", "products-1"],
         "sections": {
           "hero-1":     { "type": "hero" },
-          "products-1": { "type": "products", "collection": "termekek" }
+          "products-1": { "type": "products", "collection": "termekek" }  // KÖTÉS, nem definíció
         }
       },
       "content": {                           // ÉRTÉKEK — locale-scoped, scope=példány-id
@@ -976,29 +1017,113 @@ Identity-szintek (mind explicit, egyik sem pozícióból származtatott):
         "en": { "fields": { "hero-1": { "line1": "METAL.","line2": "GLASS." } } }
       }
     }
-  },
-  "collections": {
-    "termekek": [
-      { "id": "itm_7f3a",
-        "fields": { "hu": { "title": "Berg Passive" }, "en": { "title": "Berg Passive" } },
-        "assets": { "img": { "assetId": "ast_abc", "alt": { "hu": "…", "en": "…" } } } }
-    ]
   }
+  // `collections` NINCS a content-docban — lásd a `CollectionDoc`-ot alább (ADR-004).
 }
 ```
 
-**JSON Schema a spike előtt.** Egy `content.schema.json` rögzíti a fenti alakot: required kulcsok,
-id-formátumok, és a **referenciális integritás** (minden `order`-id létezik a `sections`-ben; minden
-`collection`-referencia létező kollekcióra mutat; minden `assetId` létező assetre). A render /
-reconcile / i18n mind ezt az **egy** alakot fogyasztja: a §4.2 `render(template, content, locale)`
-szignatúrát kap, és a hidratálás a §14.2 `resolve(field, locale)`-on megy át (fallback / required /
-hidden policy a hidratáláson **belül**, locale-publikálást bukathat).
+**Kanonikus váz — `CollectionDoc`** (kollekciónként egy, saját revízió-vonallal):
+
+```jsonc
+{
+  "collectionSchemaVersion": 1,              // a KOLLEKCIÓ sémájának verziója, a §16.2.3 kulcsa
+  "siteId": "site_v1b0r",
+  "name": "termekek",
+  "schema": {                                // OSZLOPOK — nem a designer HTML-jéből származik
+    "columns": [
+      { "name": "title", "type": "text",     "required": true },
+      { "name": "desc",  "type": "longtext" },
+      { "name": "img",   "type": "image",    "altRequired": true }
+    ]
+  },
+  "rows": [
+    { "id": "itm_7f3a",
+      "fields": { "hu": { "title": "Berg Passive", "desc": "Uw=0,66" },
+                  "en": { "title": "Berg Passive", "desc": "Uw=0.66" } },
+      "assets": { "img": { "assetId": "ast_abc", "alt": { "hu": "…", "en": "…" } } } }
+  ]
+}
+```
+
+**A `schemaVersion` története.** A `2` ennek a szakasznak az eredeti váza. A `3` a step-4 kampányban
+keletkezett, a `templateVersion` bevezetésével — a megvalósításban landolt, a pinelt vázban nem
+látszott. A `4` **ez a lépés**: a `collections` kulcs eltávolítása a `ContentDoc`-ból. A meglévő
+`3`-as adat átvitele nem rekonciliáció, hanem egyszeri, azonosító-megőrző kiemelés; a normatív
+eljárás és az, hogy miért nem körkörös, a **§16.2.4**-ben áll.
+
+**JSON Schema a spike előtt.** Két séma rögzíti a fenti alakokat: `content.schema.json` és
+`collection.schema.json` — required kulcsok, id-formátumok, és a **referenciális integritás**
+(minden `order`-id létezik a `sections`-ben; minden `assetId` létező assetre mutat). A kötés
+integritása **entitás-határon átnyúló**, ezért külön kimondva: minden `sections[*].collection` név
+létező `CollectionDoc`-ra mutat ugyanazon a `siteId`-n, és a szekció-séma `requires` oszloplistája
+(§3.4) **kielégül** a kötött kollekció sémájából. Feloldatlan kötés → `UnboundCollection`,
+kielégítetlen oszlop-követelmény → `UnsatisfiedBinding`; mindkettő a publish és a dry-run
+fail-closed hibája (§16.2.1). A spike store-ban ez a check app-szintű (§16.5), a pilotnál DB-szintű.
+A render / reconcile / i18n mind ezt az **egy** alakot fogyasztja: a §4.2
+`render(template, content, collections, locale)` szignatúrát kap, és a hidratálás a §14.2
+`resolve(field, locale)`-on megy át (fallback / required / hidden policy a hidratáláson **belül**,
+locale-publikálást bukathat).
 
 ### 16.2 Reconciliation & migráció — teljes protokoll (P0.4 kiegészítés)
 
+> **Ez a szakasz le van cserélve, nem javítva.** Az **ADR-004** (elfogadva 2026-07-28) kiveszi az
+> ismétlődő, strukturált adatot a template alól: a kollekciónak saját, stabil sémája van, a template
+> **hivatkozik** rá, nem **definiálja** azt. A szakasz korábbi normatív szövege — a `collection-item`
+> operátor-hatókör, az „item-mező szinten, minden itemre külön" szabály, a sor-életciklus tilalmi
+> mondata és a „Kollekció item-séma változás" / draft-quarantine bekezdés — a lezárt step-4 kampány
+> tekintélyi pinjén, a `cms-architecture-validation@bb0938a` commiton változatlanul elérhető marad,
+> és az ott mért eredmények arra a szövegre vonatkoznak. Az alábbi szöveg **önmagában áll.**
+
 A §4.4 auto-name-match csak *törlésre* védett (quarantine). Az adverzariális kör több nem kezelt
 esetet talált (az eredeti három mellé a §16.2 round-0 tekintély-kihívása továbbiakat), amelyek
-cáfolják a „nincs vak felülírás" ígéretet. Feloldás:
+cáfolják a „nincs vak felülírás" ígéretet. A feloldás **két, egymást nem érintő migráció-fajtára**
+bomlik: az oldal-hatókörű redesign-migrációra (§16.2.2) és a kollekció-hatókörű oszlop-migrációra
+(§16.2.3).
+
+**A négy garancia mindkét fajtára változatlanul áll.** (1) **Nincs néma veszteség** — ami nem talál
+helyet, azt az ember **látja**. (2) **Nincs néma áthelyezés** — azonosítót sosem vezetünk le
+tippelésből; a `line1`↔`line2` csere tilalma marad, és oszlop-szinten is érvényes. (3) **Az előnézet
+leírja az aktiválást**, és emberi jóváhagyás nélkül semmi nem aktiválódik. (4) **Revíziók és
+rollback.** Ahol egy operátor **hiányzik** a szótárból, ott a következmény **látható elutasítás**,
+nem veszteség: az érintett értékek quarantine-rekordba kerülnek, a diffben megjelennek, és az
+aktiválás után is olvashatók. Ha egy implementáció úgy valósítja meg ezt a szakaszt, hogy egy nem
+támogatott eset értéket **ejt**, az szerződésszegés, nem hiányzó funkció.
+
+#### 16.2.1 A két migráció-fajta, és hogy soha nem keverednek
+
+| | **Redesign-migráció** (§16.2.2) | **Kollekció-séma-migráció** (§16.2.3) |
+|---|---|---|
+| Kiváltó | új template-verzió (re-ingeszt, §4.4) | a kollekció sémájának szándékos módosítása |
+| Hatókör | section-instance és block **mezői** | egy kollekció **oszlopa**: `(collectionName, fieldName)` |
+| Manifest-kulcs | `(from-templateVersion → to-templateVersion)` | `(collectionName, from- → to-collectionSchemaVersion)` |
+| Mit ír | a `ContentDoc` egy új revízióját | egy `CollectionDoc` egy új revízióját |
+| Amit **nem** érint | egyetlen kollekció-sort sem | a template-et és az oldal-szintű mezőket sem |
+| Szótár | hat operátor | **két** operátor |
+| Gyakoriság | minden redesign | ritka, szándékosan kiváltott |
+
+Egy manifest **pontosan egy** fajtához tartozik. Az a manifest, amely mindkét fajta bejegyzését
+hordozza, a dry-run szakaszban **elutasításra kerül** (`MixedMigrationScope`). Egy aktiválás sosem ír
+`ContentDoc`-ot és `CollectionDoc`-ot ugyanabban a revízióban; ez alól az **egyetlen** kivétel a
+§16.2.4 séma-lift, ami nem migráció, hanem egyszeri áthelyezés.
+
+**Ha egy redesign kollekció-oldali változást igényel, a két lépés sorrendbe tehető, de nem
+összevonható.** Ha az új template olyan oszlopot vár a kötött kollekciótól, ami nincs meg (a
+szekció-séma `requires` listája nem elégül ki, §3.4), a redesign dry-runja elutasít
+(`UnsatisfiedBinding`), és **előbb** a kollekció-séma-migrációt kell lefuttatni és jóváhagyatni. Ha
+az új template olyan kollekció-nevet köt, amihez nem tartozik `CollectionDoc`, a dry-run elutasít
+(`UnboundCollection`): a kötés feloldása **explicit template-oldali aktus** — a fejlesztő a
+meglévő kollekció nevére köti a szekciót, vagy új kollekciót hoz létre —, ami egyetlen sort sem
+mozgat és egyetlen értéket sem quarantine-ol. **A `CollectionDoc` `name` mezője immutábilis**, épp
+azért, hogy egy „átnevezés" ne igényeljen entitás-határon átnyúló írást több kötés fölött. Egy
+kollekció „átnevezése" ezért nem tartalom-migráció, hanem kötés-feloldás — a sorok, az `itemId`-k
+és az értékek érintetlenek maradnak, és ez az, ami a régi szöveg megoldatlan „átnevezett sor
+materializálása" kérdését **tárgytalanná** teszi: sor sosem keletkezik és sosem nevez át migráció.
+
+#### 16.2.2 Oldal-hatókör — a redesign-migráció
+
+Ez a szakasz a step-4 kampány által megkeményített szöveg, változatlan formában, azzal az egyetlen
+különbséggel, hogy a hatóköréből a `collection-item` **kikerült**. A stílus szándékos: ez egy
+**kötelező elutasítások listája**, nem képességlista.
 
 **Precedencia (definiálva):** az explicit migrációs manifest **mindig nyer**; az automatikus
 név-egyezés csak a *maradékot* viszi tovább — azokat a `(scopeId, fieldName)` párokat, amelyek neve
@@ -1013,6 +1138,10 @@ locale-ban no-op, nem hiba. Ha egy `(scopeId, fieldName)` pár neve és scope-ja
 **típusa** megváltozott, az **nem maradék**: explicit `transform` nélkül a forrásérték
 quarantine-ba kerül, a slot pedig **érték nélkül** marad. Típusváltás sosem megy át
 néma `kept`-ként.
+
+> **A locale-dimenzió külön, folyamatban lévő döntés tárgya.** Ez a szakasz a locale-kezelést
+> változatlanul veszi át a korábbi szövegből, és **szándékosan nem épít rá többet**: azt, hogy a v1
+> egyáltalán több locale-t támogat-e, önálló döntés dönti el, nem ez az újraírás.
 
 A manifest bejegyzései **egyidejűleg**, a migráció előtti tartalom egyetlen pillanatképe fölött
 értékelődnek ki, nem egymás után sorrendben: minden operátor forrása a migráció **előtti** érték, és
@@ -1039,18 +1168,12 @@ megy. A változatlanul maradó mező továbbvitele az azonos forrású és cél�
 bejegyzéssel mondható ki; ez **nem** új operátor.
 
 **Slot mozgatása szekciók között — most explicit `move`.** `move: hero-1.tagline → intro-1.tagline`.
-Enélkül az érték elárvul (quarantine), nem tűnik el némán. A section-instance / block /
-collection-item **id megváltozása nem vezethető le** típus-, mezőhalmaz- vagy pozíció-egyezésből.
+Enélkül az érték elárvul (quarantine), nem tűnik el némán. A section-instance / block
+**id megváltozása nem vezethető le** típus-, mezőhalmaz- vagy pozíció-egyezésből.
 Scope átnevezéséhez explicit `move` bejegyzés kell minden érintett mezőre; enélkül a scope mezői
-quarantine-ba mennek.
-
-**Kollekció item-séma változás — nem fail-close-olja az egész oldalt.** Új mező default `optional`.
-Egy meglévő mező `required`-dé tétele (pl. `altRequired:true`) **migráció**. A választás a
-**manifesté, nem az implementációé**: ha a `required`-dé tett mezőhöz a manifest nem ad explicit
-default-értéket, az érintett sorok **draft-quarantine**-ba mennek és az adott locale/section
-publikálhatóságát blokkolják egy világos diffel — **nem** a teljes site-publisht bukatják némán.
-Az implementáció **sosem talál ki alapértéket** (üres string sem alapérték). A manifest-adta
-kitöltés a diff **cél-oldali listáján** `default-filled` soron jelenik meg, sorszámmal.
+quarantine-ba mennek. A `move` cél-scope-jának a **következő** template-ben léteznie kell — ez
+section-instance és block esetén teljesíthető, mert a cél-scope-ot a fejlesztő írja meg az új
+template-ben. A `move` **sosem hoz létre** cél-scope-ot implikációból.
 
 **Migrációs operátorok (specifikálva):**
 
@@ -1071,33 +1194,37 @@ a manifest valamely operátorának forrás-hivatkozása számít; az auto-match 
 felszabadítását a manifest explicit `delete` (→ quarantine) bejegyzésével kell kimondani. Vak
 felülírás nem történhet.
 
-A **quarantine** (eltávolított érték megőrzése) és a **draft-quarantine** (hiányzó `required` mező
-miatt publikálásból kizárt sor) két külön fogalom; az alábbi szerződés a **quarantine**-ra
-vonatkozik. A quarantine **rekord, nem jelölés**: minden quarantine-sor tárolja a
-`(locale, scopeId, fieldName)` hármast, a **nyers értéket**, a forrás mezőtípust, a forrás
+A **quarantine** (eltávolított érték megőrzése) **rekord, nem jelölés**: minden quarantine-sor
+tárolja a `(locale, scopeId, fieldName)` hármast, a **nyers értéket**, a forrás mezőtípust, a forrás
 `templateVersion`-t és az okot (`orphan | ambiguous | impure-scope | type-changed |
 non-invertible-transform | delete | merged`), és az aktiválás után is megmarad, hogy a `restore`
 végrehajtható legyen. Érték nélküli quarantine-sor **nem** elégíti ki a §4.4 "nem tűnik el némán"
-követelményét. A **draft-quarantine** sor a `(locale, collection, itemId)` hármast és a blokkoló
-mezőnevet tárolja; nem hordoz eltávolított értéket, és nem elégíti ki a fenti szerződést, mert nem is
-érték-eltávolítás.
+követelményét.
 
 Az invertálhatóság **deklarált, nem levezetett**: egy `transform` akkor és csak akkor invertálható,
 ha a manifest megnevez hozzá egy verziózott inverz függvényt. Minden más `transform`
 non-invertálhatónak számít, és a forrásérték **quarantine-ban marad**. Mintaértékeken végzett
 round-trip **nem** bizonyít invertálhatóságot.
 
-**Hatókör:** az operátorok **scope-ja** lehet section-instance, block vagy collection-item, és
-minden esetben az adott scope **mezőire** hatnak (a mezőidentitás mindig `(scopeId, fieldName)`,
-§16.1). A `transform` determinisztikus és mellékhatás-mentes, hogy a dry-run és a rollback
-reprodukálható legyen. A `split` és `merge` operandusai **kvalifikált**
-`(scopeId, fieldName)` párok, és minden operandusnak **ugyanabban a scope-ban** kell lennie;
-scope-ok közötti összevonás csak `move` + `merge` láncként fejezhető ki. Kollekcióra alkalmazva az
-operátorok **item-mező szinten, minden itemre külön** futnak: a scope a collection-item, az
-operandus a mezője. **Sorok** (collection-item) összevonása, törlése vagy létrehozása nem
-`merge`/`delete`/`split` — ezek nem migrációs operátorok. A `transform` a manifestben **csak névvel
-és verzióval** hivatkozható; az implementáció a kódbázis zárt, tesztelt registryjében él. A manifest
-sosem hordoz függvénytestet, kifejezést vagy DSL-t. Ismeretlen név vagy verzió → a dry-run elutasít.
+**Hatókör:** az operátorok **scope-ja** section-instance **vagy** block, és minden esetben az adott
+scope **mezőire** hatnak (a mezőidentitás mindig `(scopeId, fieldName)`, §16.1). A `collection-item`
+**nem operátor-hatókör**, és a kollekció-oszlop sem: a redesign-migráció **egyetlen kollekció-sort
+sem olvas és egyetlen kollekció-értéket sem ír.** A `transform` determinisztikus és
+mellékhatás-mentes, hogy a dry-run és a rollback reprodukálható legyen. A `split` és `merge`
+operandusai **kvalifikált** `(scopeId, fieldName)` párok, és minden operandusnak **ugyanabban a
+scope-ban** kell lennie; scope-ok közötti összevonás csak `move` + `merge` láncként fejezhető ki. A
+`transform` a manifestben **csak névvel és verzióval** hivatkozható; az implementáció a kódbázis
+zárt, tesztelt registryjében él. A manifest sosem hordoz függvénytestet, kifejezést vagy DSL-t.
+Ismeretlen név vagy verzió → a dry-run elutasít.
+
+**Sor-életciklus nem migráció.** Egy kollekció-sor felvétele, törlése, átnevezése vagy átrendezése
+**hétköznapi szerkesztés** a kollekció saját felületén, a saját revízió-vonalán — nem szerepel sem
+ebben, sem a §16.2.3 szótárában, és nem képezi tárgyát semmilyen re-ingeszt-diffnek.
+
+**Költségmodell (normatív).** Egy manifest-bejegyzés kiértékelési költsége `locales × 1`. **A
+kollekció-sorok száma semmilyen módon nem szorzója az operátor-kiértékelésnek** — sem itt, sem a
+§16.2.3-ban. Egy tekintély, amely a sorok számát az operátor-kiértékelés szorzójává teszi, ezt a
+szakaszt megsérti.
 
 **Kötelező dry-run diff** (a §4.4-ből P0.4-be emelve): a re-ingeszt előbb egy diffet ad, amelynek
 **forrás-oldali** kategóriái (`kept / renamed / moved / transformed / quarantined`) és **cél-oldali**
@@ -1110,8 +1237,10 @@ aktiválás **elutasítva** (`StaleMigration`), és új dry-run kell. Az aktivá
 egyetlen bázis-revízióval** — a §16.4 revision-guard az aktiválásra is vonatkozik. Az aktiválás
 atomicitási határa **egyetlen revízió**: az új content-doc, a **quarantine-rekordok** és a
 `templateVersion`-váltás ugyanabban a revízióban landol. Ha a quarantine nem tud ugyanabban a
-revízióban landolni, a migráció **nem aktiválható**. Az aktiválás után az **előző template- és
-content-verzió megmarad**, hogy a rollback végrehajtható legyen.
+revízióban landolni, a migráció **nem aktiválható**. A `CollectionDoc`-ok **nincsenek** ezen a
+határon belül, mert a redesign nem írja őket; ezért a `StaleMigration` ablakát egy párhuzamos
+**sor-szerkesztés nem nyitja meg.** Az aktiválás után az **előző template- és content-verzió
+megmarad**, hogy a rollback végrehajtható legyen.
 
 A dry-run diff két részből áll. (a) A **forrás-oldali partíció**: minden tárolt forrásérték —
 `(locale, scopeId, fieldName)` — **pontosan egy** kategóriába kerül az **öt forrás-oldali** közül, és
@@ -1122,6 +1251,168 @@ forrása `transformed`. (b) A **cél-oldali lista**: azok az új vagy megmaradó
 semmilyen forrásérték nem érkezik — `new-empty`, ha nincs kitöltésük, `default-filled`, ha a
 manifest explicit alapértéket ad. A cél-oldali lista **nem** a forrás-oldali kategóriák része, és nem tartalmaz
 forrásértéket.
+
+#### 16.2.3 Kollekció-hatókör — az oszlop-migráció
+
+**A hatókör az oszlop, nem a sor.** Egy kollekció-oldali szabály a `(collectionName, fieldName)`
+**oszlopra** vonatkozik — a mezőre az összes soron keresztül —, és **egyszer** értékelődik ki egy
+migrációra. Az oszlopnév **struktúra**, tehát a §16.1 szerint locale-független; a szabály
+kiértékelése ezért **sem a sorok számától, sem a locale-ok számától nem függ.** Ez a szakasz
+legfontosabb állítása, és normatív: **a sorok száma soha többé nem lehet az operátor-kiértékelés
+szorzója.**
+
+**Az elutasítás a sémapárból dől el, adat olvasása előtt.** Minden alábbi elutasítás kizárólag a
+`(from-collectionSchemaVersion, to-collectionSchemaVersion)` sémapárból és a manifestből számítható.
+Egy elutasított migráció **nem olvas sorokat.** (A korábbi szöveg alatt a *refusal* volt a drágább
+út; ez itt szerkezetileg kizárva.)
+
+**A szótár — két operátor, és nincs harmadik:**
+
+| Operátor | Szemantika | Kötelező elutasítások |
+|---|---|---|
+| `renameColumn` | `(c, a) → (c, b)`; minden sor minden locale-jában, **az érték változatlan** | ha `a` nincs a régi sémában; ha `b` nincs az újban; ha `b` **típusa** eltér `a` típusától; ha `b` a migráció előtt **bármely** sorban értéket hordoz, amit egyetlen manifest-bejegyzés sem fogyaszt el forrásként (foglaltság); ha két bejegyzés ugyanarra a céloszlopra ír |
+| `dropColumn` | `(c, a) → quarantine`; az oszlop minden értéke rekordba kerül, nem hard-törlés | ha `a` nincs a régi sémában; ha `a` **benne van** az új sémában (akkor nem eltűnés, a bejegyzés hazudik); ha a quarantine nem tud ugyanabban a revízióban landolni |
+
+A két operátor neve **szándékosan különbözik** az oldal-hatókör `rename`/`delete` operátoraitól: nem
+ugyanazok, nem cserélhetők fel, és nem szabad közös implementációt feltételezni közöttük.
+
+**Automatikus egyeztetés és a tiszta oszlophalmaz szabálya.** A maradékot ugyanaz az elv viszi
+tovább, mint az oldal-hatókörben: az az oszlop, amelynek **neve ÉS típusa változatlan.** Ha a
+kollekció oszlopnév-halmazában **egyszerre** jelenik meg új és tűnik el régi név, a halmaz **nem
+tiszta**: az auto-match a kollekció **egyetlen** oszlopára sem fut le — a megmaradó nevek is csak
+explicit `renameColumn` bejegyzéssel vihetők tovább, minden fedezetlen oszlop quarantine-ba megy
+(`impure-columns`). **Ez a `title`↔`desc` oszlopcsere tilalma: a `line1`↔`line2` szabály oszlop-szintű
+megfelelője**, és ugyanaz a 2. garancia áll mögötte. Egy oszlop változatlan továbbvitele az azonos
+forrású és célú `renameColumn: (c,f) → (c,f)` bejegyzéssel mondható ki; ez **nem** új operátor.
+
+**Típusváltás nincs a szótárban.** Ha egy megmaradó nevű oszlop típusa megváltozik, az **nem
+maradék**, és nincs rá operátor: az oszlop minden értéke quarantine-ba kerül (`type-changed`), az
+oszlop a migráció után **érték nélkül** áll, és a diff ezt oszlop-sorként, az érintett értékek
+számával mutatja. Ez látható elutasítás, nem veszteség.
+
+**Új oszlop.** A cél-oldali listán jelenik meg: `new-empty`, ha nincs kitöltése, `default-filled`, ha
+a manifest **explicit** alapértéket ad. Az implementáció **sosem talál ki alapértéket** (üres string
+sem alapérték). Egy `required: true` oszlop, amihez a manifest nem ad alapértéket, a **dry-run
+szakaszban elutasítja a teljes migrációt** (`RequiredWithoutDefault`) — sor tehát **nem kerülhet**
+migráció miatt publikálásból kizárt állapotba.
+
+**Amit ez a szakasz NEM nyújt — és mi ennek a következménye.** Az alábbiak **hiányzó operátorok**,
+nem elfelejtett esetek. Mindegyiknél a következmény **ugyanaz**, és ez a következmény normatív:
+az érintett értékek quarantine-rekordba kerülnek, a dry-run diffben megjelennek, az aktiválás után
+olvashatók és exportálhatók, a céloszlop pedig `new-empty`-ként áll elő. **A CMS nem tölti ki; az
+ember tölti ki.** Egy implementáció, ami bármelyik alábbi esetben értéket **ejt** vagy értéket
+**kitalál**, szerződést szeg.
+
+- **`merge` oszlopokon** (`[c.f1, c.f2] → c.f`). Nincs kombinátor, nincs operandus-sorrend, nincs
+  aritás-korlát, mert nincs mit korlátozni. Következmény: a forrásoszlopok `dropColumn`-nal
+  quarantine-ba, a céloszlop `new-empty`-ként áll elő.
+- **`split` oszlopokon** (`c.f → [c.f1, c.f2]`). Ugyanaz a következmény.
+- **`transform`, per-item transzformációs láncok, deklarált inverzek, zárt függvény-registry.**
+  Következmény: minden típus- és formátumváltás quarantine + kézi újratöltés. Ezen a hatókörön
+  **nincs** függvény-registry és **nincs** invertálhatósági deklaráció.
+- **Veszteségmentes típus-tágítás sem** (`text` → `longtext`, `text` → `richtext`). Ez szándékos, és
+  a legszűkebb védhető álláspont: azt, hogy **ki birtokolja a kollekció sémáját** (a termék előre,
+  vagy az ügyfél futásidőben), a v1 még nem döntötte el, és egy tágítási háló mérete ettől függ.
+  Amíg ez nyitott, a tágítás is **látható elutasítás**.
+- **Oszlop mozgatása kollekciók között** (`move` analógja). Következmény: `dropColumn` a forrásban +
+  új oszlop a célban, quarantine-on keresztül.
+- **Sor-szintű operátorok** — sor összevonása, szétvágása, törlése, létrehozása, átnevezése,
+  átrendezése. Ezek nem hiányzó operátorok, hanem **nem migrációs műveletek**: a sor-életciklus
+  hétköznapi szerkesztés (§16.2.2 zárómondata).
+- **Kollekciók összevonása, szétvágása, sorok mozgatása kollekciók között.**
+- **`items`-szerű, nem konkrét szelektor bármelyik operátoron.** Az oszlop **maga** a
+  kollekció-szintű cím; nincs szükség sorhalmaz-szelektorra, és nincs is. Két kiválasztott sorhalmaz
+  megfeleltetése ezért **fel sem merül.**
+
+**Költségmodell (normatív).**
+
+- **Operátor-kiértékelés:** `O(a manifest oszlop-bejegyzéseinek száma)`. A sorok és a locale-ok
+  száma **nem** szorzó.
+- **Elutasítás:** a sémapárból, **egyetlen sor olvasása nélkül**.
+- **Adatírás elfogadás után:** `O(érintett értékek)` — ez sor- és locale-arányos, de ez **másolás,
+  illetve rekordba írás**, nem operátor-kiértékelés. A kettő összekeverése az a hiba, amit ez a
+  szakasz kizár.
+- **Quarantine-rekordok:** `O(érintett értékek)` — mert az 1. garancia szerint minden rekordnak a
+  **nyers értéket** kell hordoznia. Ez az **egyetlen** hely, ahol a sorok száma jogosan megjelenik,
+  és ez adat-, nem szabály-költség.
+- **A jóváhagyás tárgya `O(oszlop)`, nem `O(sor)`:** a diff **oszlop-szintű**, minden sora hordozza
+  az érintett értékek **számát** és egy navigálható hivatkozást a quarantine-rekordokra. A
+  rekordhalmaz teljes (1. garancia), de nincs beágyazva a jóváhagyandó objektumba. Ember nem hagy
+  jóvá ezer sort azért, hogy egy oszlopot átnevezzen.
+
+**Quarantine oszlop-hatókörön.** Minden quarantine-rekord tárolja a
+`(collectionName, itemId, locale, fieldName)` négyest, a **nyers értéket**, a forrás-oszloptípust, a
+forrás `collectionSchemaVersion`-t és az okot: `orphan | ambiguous | impure-columns | type-changed |
+dropped`. A `non-invertible-transform` és a `merged` ok **nem fordulhat elő**, mert a szótár nem
+ismer `transform`-ot és `merge`-öt. Érték nélküli quarantine-sor itt sem elégíti ki a §4.4
+követelményét.
+
+**A draft-quarantine megszűnik.** A korábbi szöveg a `required`-dé tett kollekció-mező miatt
+publikálásból kizárt sorokra vezetett be egy második, perzisztens naplót. Ez **tárgytalan**:
+(a) a rekord **sosem hordozott eltávolított értéket**, tehát megszüntetése az 1. garanciát nem
+érintheti; (b) az esetet, amit kezelt, most a dry-run `RequiredWithoutDefault` elutasítása **meg sem
+engedi létrejönni**; (c) a hiányzó locale-értékek publikálás-blokkolása a §14.2 publish-policy
+dolga, ami **publikáláskor, az aktuális adatból** számol, nem egy perzisztált migrációs naplóból.
+A megmaradó **quarantine** fogalom egyetlen, érték-hordozó rekordtípus, és a fenti szerződés
+vonatkozik rá.
+
+**Dry-run, jóváhagyás, aktiválás.** Ugyanaz a szerződés, mint az oldal-hatókörben, egy szinttel
+lejjebb: a dry-run diff a jóváhagyás **tárgya és egyben az aktiválás bemenete**; hordozza a bázis
+`CollectionDoc`-revíziót és a `(from- → to-collectionSchemaVersion)` párt; az aktiválás **pontosan**
+a jóváhagyott sorokat írja, nem újraszámolt eredményt; eltérő bázis-revízió vagy séma-verzió esetén
+`StaleMigration` és új dry-run; az aktiválás **egyetlen írás, egyetlen bázis-revízióval** (a §16.4
+revision-guard alatt), és az új sor-állapot, a quarantine-rekordok és a `collectionSchemaVersion`
+váltása **ugyanabban a revízióban** landol. Ha nem tudnak együtt landolni, a migráció nem
+aktiválható. Az előző revízió megmarad.
+
+**Az oszlop-hatókörön nincsenek operátor-inverzek.** A `rollback` **revízió-visszaállítás**, nem
+inverz operátor-lánc: az előző `CollectionDoc`-revízió tartalmazza a régi sémát és a régi értékeket.
+Ezért itt sem deklarált inverzre, sem `restore`-parancsra nincs szükség a rollbackhez — a `restore`
+(quarantine-ból egyedi érték visszatétele) továbbra is **külön, nyitott képesség-kérdés**, és nem
+ennek a szakasznak a garanciája.
+
+**A diff kategóriái oszlop-hatókörön** — szűkebbek, mert a szótár szűkebb. Forrás-oldal:
+`kept | renamed | quarantined`. Cél-oldal: `new-empty | default-filled`. A `moved` és a
+`transformed` kategória **nem fordulhat elő**; ha egy implementáció ilyen sort állít elő, hibás.
+
+#### 16.2.4 Séma-lift: a meglévő adat kiemelése (`schemaVersion` 3 → 4)
+
+A `collections` kulcs eltávolítása a `ContentDoc`-ból megköveteli a meglévő spike-adat átvitelét.
+Ez **nem rekonciliáció, és ezért nem körkörös** — a körkörösség pontosan itt szakad meg, és a
+következő hét szabály mondja meg, hogyan.
+
+1. **A lift nem egyeztet.** Nem old fel nevet semmilyen új template ellen, nincs manifestje, nincs
+   auto-matche, nincs operátora. Minden azonosító — `collectionName`, `itemId`, `fieldName`,
+   `locale`, `assetId` — **bitre változatlanul** kerül át.
+2. **A lift érték-invariáns.** Ha a kiemelés után bármely érték digestje eltér a kiemelés előttitől,
+   a lift **elutasít** (`LiftValueMismatch`). Nem részleges lift van, hanem nincs lift.
+3. **Alkalmazhatóság.** A lift csak akkor futtatható, ha a forrás `collections` blokkja **pontosan**
+   a `schemaVersion: 3` alakot valósítja meg, séma-validáltan. Bármely eltérés → elutasítás
+   (`LiftShapeMismatch`), részleges kiemelés nélkül. Ez látható elutasítás: az adat a helyén marad.
+4. **A kiemelt kollekció sémája egyszer, a lift pillanatában áll elő** — a lift **bemenetéül szolgáló,
+   régi** szekció-séma `item.fields` blokkjából (a §3.4 korábbi, kollekció-definiáló alakja, ami a
+   `bb0938a` pinen olvasható) és a tényleges adatból. **Ez az egyetlen alkalom, amikor egy
+   kollekció sémája a designer HTML-jéből származik**, és egyszeri bootstrap, nem szabály: a lift
+   **bemenete** a régi világ (a template definiálja a sort), a **kimenete** az új (a kollekció
+   definiálja önmagát). Utána a template csak `requires`-szel támaszt követelményt a kollekcióval
+   szemben (§16.1), definiálni nem definiálja.
+5. **A sémát nem találjuk ki.** Ha egy sor olyan mezőt hordoz, ami a régi szekció-séma
+   item-mezőlistájában nincs benne, vagy a lista olyan mezőt deklarál, amit egyetlen sor sem hordoz
+   és a típusa nem egyértelmű, a lift **elutasít** (`LiftSchemaAmbiguity`), és a séma **emberi**
+   megadását kéri. A lift után a séma forrása kizárólag a `CollectionDoc`.
+6. **Előnézet és jóváhagyás (3. garancia).** A lift előnézete kollekciónként megadja a sorok számát,
+   az oszlopok nevét és típusát, és **kimondja, hogy nulla érték változik**. A lift **nem termel
+   quarantine-rekordot**: ha bármely érték quarantine-ba kerülne, az nem lift, hanem migráció, és a
+   lift elutasít. Emberi jóváhagyás nélkül nem aktiválódik.
+7. **Írás-sorrend és rollback (4. garancia).** Ez az **egyetlen** entitás-határon átnyúló írás a
+   rendszerben, ezért a sorrend **normatív, nem implementációs részlet**: előbb a `CollectionDoc`-ok
+   íródnak ki, tartalom-hash-re kulcsolt, immutábilis írással; utána a `ContentDoc`
+   `schemaVersion: 4` revíziója, a §16.4 revision-guard alatt. Ha a második írás elbukik, a már
+   kiírt `CollectionDoc`-okra **semmi nem hivatkozik** — inertek —, a lift tehát **idempotensen**
+   újrafuttatható. A `schemaVersion: 3` revízió megmarad; visszaállítása után a `CollectionDoc`-ok
+   inertek maradnak, **visszaállítás nem töröl adatot.** (A §16.5 rögzíti, hogy a spike store-ban a
+   referenciális integritás app-szintű; a fenti sorrend ezért a helyesség feltétele, nem
+   optimalizáció.)
 
 ### 16.3 Biztonságos render-szerződés — teljes sink-lista + import-izoláció (P0.3 kiegészítés)
 
