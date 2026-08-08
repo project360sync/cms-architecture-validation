@@ -1409,15 +1409,40 @@ sorban értéket hordoz") egzisztenciális állítás a sorok fölött.
   `dropColumn` célja mégis szerepel az új sémában; két bejegyzés egy céloszlopra
   (`ColumnTargetConflict`); verzió-lépés (`UnbridgedCollectionVersionGap`); vegyes hatókör
   (`MixedMigrationScope`); érvénytelen vagy ütköző oszlopnév (`InvalidColumnName` /
-  `AmbiguousColumnName`); kötés-követelmény sérülése (`BindingRequirementBreak`).
-- **A foglaltság-predikátum — az egyetlen adatfüggő elutasítás.** A `renameColumn` céloszlopának
-  foglaltsága és a lenti `RequiredWithoutDefault` záró-ellenőrzés **nem** dönthető el a sémapárból.
-  Ez **egzisztenciális jelenlét-predikátum**: „van-e legalább egy sor (és publikálandó locale), ahol
-  az oszlop értéket hordoz". Az implementáció **csak ezt** olvashatja — a **jelenlétet**, nem a
-  **tartalmat** —, és **csak a manifesttel érintett oszlopokra**. **Séma-jelenléttel való közelítés
-  tilos**: egy deklarált, de üres oszlop **nem foglalt** (ilyet a `type-changed` és a lift 5.
-  szabálya is előállít), és a közelítés két implementációt ellentétes válaszra vezetne ugyanazon a
-  manifesten.
+  `AmbiguousColumnName`); típusidegen alapérték (`InvalidColumnDefault`); kötés-követelmény sérülése
+  (`BindingRequirementBreak`).
+  **Ez az osztály HÁROM bemenet fölött zárt, nem kettő fölött**, és ezt ki kell mondani, mert a
+  neve mást sugall: a `(from- → to-collectionSchemaVersion)` sémapár, a manifest **és a kötő
+  template-verziók `requires` listái**. A harmadik bemenet **kizárólag** a
+  `BindingRequirementBreak`-hez kell, és ez a bemenet **séma, nem adat**: a `requires` listák a
+  template-manifestből olvasódnak, egyetlen sor olvasása nélkül. Az osztályt tehát az „**egyetlen
+  sor olvasása nélkül**" tulajdonság zárja, nem a bemenetei száma; egy implementáció, amely a
+  `BindingRequirementBreak`-et azért hagyja ki, mert „a sémapárból nem számítható", ezt a szakaszt
+  sérti meg. A harmadik bemenet pinelése **kötelező** — lásd „A terv template-verziókat is pinel".
+- **A jelenlét-predikátum — az egyetlen adatfüggő osztály, KÉT, eltérő olvasási hatókörű
+  ellenőrzéssel.** Sem a `renameColumn` céloszlopának foglaltsága, sem a lenti
+  `RequiredWithoutDefault` záró-ellenőrzés **nem** dönthető el a sémapárból. Mindkettő ugyanaz a
+  **fajta** olvasás — **egzisztenciális jelenlét-predikátum**: „van-e legalább egy sor (és
+  publikálandó locale), ahol az oszlop értéket hordoz" —, és az implementáció **mindkettőnél csak
+  ezt** olvashatja: a **jelenlétet**, nem a **tartalmat**. Amiben a kettő **különbözik, az az
+  olvasási hatókör**, és ezt itt külön kimondjuk, mert egy közös hatókör-mondat az egyiket
+  **használhatatlanná** tenné:
+  - **Foglaltság (`renameColumn` céloszlopa):** az olvasás hatóköre a **manifesttel érintett
+    céloszlopok** halmaza. Ez elég, mert a foglaltság kérdése definíció szerint egy
+    manifest-bejegyzés **céloszlopáról** szól.
+  - **`RequiredWithoutDefault` záró-ellenőrzés:** az olvasás hatóköre a **cél-séma minden
+    `required: true` (és `image` oszlopnál `altRequired: true`) oszlopa** — **függetlenül attól,
+    hogy a manifest érinti-e.** Ez **nem** szűkíthető a manifest-fedett halmazra, mert a lenti
+    **négy** útból **három** definíció szerint manifesttel **nem** érintett oszlopon keletkezik: a
+    kötelezővé tétel (2. út) egy auto-match **maradék**-oszlop, amit **egyetlen bejegyzés sem
+    említ**; a `type-changed` (3. út) éppen attól áll elő, hogy **nincs** rá operátor; az
+    `impure-columns` (4. út) pedig **definíció szerint fedezetlen**. A manifestre szűkítő olvasat
+    mellett egy `desc.required: false → true` váltás **üres** manifesttel semmit nem olvasna, semmit
+    nem utasítana el, a migráció landolna, és 60 üres `desc`-ű sor válna publikálhatatlanná —
+    pontosan az az eset, amit ez az ellenőrzés zár le.
+  **Séma-jelenléttel való közelítés mindkettőnél tilos**: egy deklarált, de üres oszlop **nem
+  foglalt** (ilyet a `type-changed` és a lift 5. szabálya is előállít), és a közelítés két
+  implementációt ellentétes válaszra vezetne ugyanazon a manifesten.
 
 Ami ebből változatlanul áll: a **korábbi** szöveg drága refusal-útja szerkezetileg kizárva marad —
 egy elutasítás **sosem futtat operátor-kiértékelést sorokon**, legfeljebb egy jelenlét-tesztet.
@@ -1512,10 +1537,21 @@ invariánsa szerint a szekció-séma `requires` listájának ki kell elégülnie
 sémájából. Ezt a kollekció-oldali migráció **el tudja rontani**, és a rontás következménye nem
 quarantine, hanem **publikálhatatlan oldal** — olyan kimenet, amit az előnézet („átnevezve, 4
 érték") nem írt le. Ezért: a dry-run kiszámítja a **migráció utáni** sémát, és ellenőrzi, hogy az
-kielégíti-e **minden**, az **aktuálisan élő** template-verzióban erre a kollekcióra kötött szekció
-`requires` listáját (név **és** típus szerint). Ha nem, a dry-run **elutasítja a teljes migrációt**
+kielégíti-e **minden**, erre a kollekcióra kötött szekció `requires` listáját (név **és** típus
+szerint), **minden élő template-verzióban**. Ha nem, a dry-run **elutasítja a teljes migrációt**
 (`BindingRequirementBreak`), **hacsak** a manifest meg nem nevez egy **összekapcsolt
 template-verziót** (`coupledTemplateVersion`).
+
+**„Élő" itt kettőt jelent, és mindkettőt.** A szó korábban egyértelműnek látszott, de két,
+egymástól **eltérő** halmazt takar, valahányszor egy redesign jóváhagyva, de még nem publikálva
+áll: (i) a legutóbb **publikált** snapshot `templateVersion`-je — mert ezt látja a látogató, és
+mert egy rollback ide tér vissza —, **és** (ii) **minden oldal draft `ContentDoc`-jának
+`templateVersion`-je** (`pages[*].templateVersion`) — mert a draft verzió `requires`-ének
+megsértése a **következő** publishnál csap le, amikor a migrációt már senki nem gyanúsítja. A
+migráció utáni sémát a két halmaz **uniója** ellen kell ellenőrizni; bármelyikben sérülő
+`requires` `BindingRequirementBreak`. Egy **még nem élő**, de már validált template-verzió ebbe a
+halmazba **nem** tartozik bele — az kizárólag `coupledTemplateVersion`-ként kerül a képbe, és
+akkor a lenti szabály szerint.
 
 **Az összekapcsolt kiadás.** A `coupledTemplateVersion` egy **már elkészített, validált, de még nem
 élő** template-verzió. A dry-run ekkor a **migráció utáni** sémát **ennek** a template-verziónak a
@@ -1616,9 +1652,14 @@ ember tölti ki.** Egy implementáció, ami bármelyik alábbi esetben értéket
 
 - **Operátor-kiértékelés:** `O(a manifest oszlop-bejegyzéseinek száma)`. A sorok és a locale-ok
   száma **nem** szorzó.
-- **Elutasítás:** séma-pár elutasításnál a sémapárból, **egyetlen sor olvasása nélkül**; a
-  foglaltság-predikátumnál **legfeljebb** egy **jelenlét-teszt a manifesttel érintett oszlopokra**
-  (`O(sor × érintett oszlop)` jelenlét-olvasás, **érték-olvasás és operátor-kiértékelés nélkül**).
+- **Elutasítás:** séma-pár elutasításnál a sémapárból **és a kötő template-ek `requires`
+  listáiból**, **egyetlen sor olvasása nélkül**; a jelenlét-predikátumnál **legfeljebb** egy
+  jelenlét-teszt, **két, eltérő hatókörrel** (lásd az elutasítások két osztályát): a
+  **foglaltságnál** a manifesttel érintett céloszlopokra (`O(sor × érintett oszlop)`), a
+  **`RequiredWithoutDefault` záró-ellenőrzésnél** a cél-séma **minden kötelező** oszlopára
+  (`O(sor × kötelező céloszlop)`) — mindkettő **érték-olvasás és operátor-kiértékelés nélkül**. A
+  záró-ellenőrzés tágabb hatóköre az 1. és a 3. garancia ára, és tudatosan vállalt: a szűkebb, a
+  manifestre korlátozott olvasás a négy útból hármon **átengedne** publikálhatatlan sorokat.
   Az `O(oszlop)` költségállítás **az operátor-kiértékelésre** szól, és ott áll is.
 - **Adatírás elfogadás után:** `O(érintett értékek)` — ez sor- és locale-arányos, de ez **másolás,
   illetve rekordba írás**, nem operátor-kiértékelés. A kettő összekeverése az a hiba, amit ez a
@@ -1633,10 +1674,24 @@ ember tölti ki.** Egy implementáció, ami bármelyik alábbi esetben értéket
 
 **Quarantine oszlop-hatókörön.** Minden quarantine-rekord tárolja a
 `(collectionName, itemId, locale, fieldName)` négyest, a **nyers értéket**, a forrás-oszloptípust, a
-forrás `collectionSchemaVersion`-t és az okot: `orphan | ambiguous | impure-columns | type-changed |
-dropped`. A `non-invertible-transform` és a `merged` ok **nem fordulhat elő**, mert a szótár nem
-ismer `transform`-ot és `merge`-öt. Érték nélküli quarantine-sor itt sem elégíti ki a §4.4
-követelményét.
+forrás `collectionSchemaVersion`-t és az okot: `orphan | impure-columns | type-changed | dropped`.
+A `non-invertible-transform` és a `merged` ok **nem fordulhat elő**, mert a szótár nem ismer
+`transform`-ot és `merge`-öt; az `ambiguous` ok **szintén nem**, és ez nem elfelejtett eset, hanem
+következmény: oszlop-hatókörön **minden** kétértelműség **elutasítás**, nem quarantine
+(`ColumnTargetConflict`, `AmbiguousColumnName`, `AmbiguousCollectionBootstrap`), mert az egyetlen
+kétértelműség-forrás — a nem tiszta oszlophalmaz — a fedezetlen oszlopokat `impure-columns` okkal
+küldi quarantine-ba. Az enum tehát oszlop-hatókörön **négyelemű**; aki `ambiguous` rekordot ír,
+hibás. Érték nélküli quarantine-sor itt sem elégíti ki a §4.4 követelményét.
+
+**A KÖZTES séma is élő kötést sérthet — a (C) szabály ára, kimondva.** A (C) szerint egy `1 → 3`
+séma-változás **két**, egyenként jóváhagyott lépésben fut, és a `BindingRequirementBreak`
+**minden lépésre külön** fut. Ebből következik, hogy ha a **köztes** (2-es) séma sérti valamelyik
+élő `requires`-t, az első lépés `coupledTemplateVersion` nélkül **nem futtatható** — akkor sem, ha
+a **végállapot** (3) minden kötést kielégít. A feloldás ilyenkor **köztes összekapcsolt
+template-verzió**: a fejlesztő a köztes sémához is előállít egy validált template-verziót, vagy
+átszabja a lépésbontást úgy, hogy egyetlen köztes séma se sértsen élő kötést. Ez **vállalt**
+költség: az alternatíva több séma-generáció egyetlen, jóvá nem hagyott ugrásban — pontosan az,
+amit az `UnbridgedCollectionVersionGap` kizár.
 
 **A draft-quarantine megszűnik.** A korábbi szöveg a `required`-dé tett kollekció-mező miatt
 publikálásból kizárt sorokra vezetett be egy második, perzisztens naplót. Ez **tárgytalan**:
