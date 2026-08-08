@@ -404,11 +404,14 @@ reingest(newHtml):
   for (const [name, value] of content.fields)
     nextTemplate.hasSlot(name) ? keep(name, value)   // a slot még létezik → megtartjuk
                                : quarantine(name)      // eltűnt → jelöljük, nem dobjuk némán
-  a kollekciók ÉRINTETLENEK — a re-ingeszt egyetlen sort sem olvas és nem ír (ADR-004)
+  a kollekció-SOROK: a re-ingeszt egyetlen sort sem ÍR és egyetlen sor-ÉRTÉKET sem olvas
+  (ADR-004); sémát, revíziót és sor-darabszámot OLVAS, és a KÖTÉST átírhatja (§16.2.2 (c))
 ```
 
-**A re-ingeszt nem nyúl a sorokhoz.** A kollekció önálló entitás, saját sémával és saját
-revízió-vonallal (§16.1); a redesign csak a **kötést** és a szekció `requires` listáját érinti.
+**A re-ingeszt nem nyúl a sor-értékekhez.** A kollekció önálló entitás, saját sémával és saját
+revízió-vonallal (§16.1); a redesign csak a **kötést** és a szekció `requires` listáját érinti —
+de a kötés átirányítása vagy megszűnése **azt** változtatja meg, hogy egy oldal melyik sorhalmazt
+rendereli, ezért ez kötelező, jóváhagyandó diff-sor (§16.2.2 (c) rész), nem „érintetlenség".
 Feloldatlan kötés vagy kielégítetlen oszlop-követelmény a dry-run fail-closed hibája — nem néma
 átalakítás, és nem is automatikus séma-változás a sorokon (§16.2.1).
 
@@ -1174,7 +1177,7 @@ támogatott eset értéket **ejt**, az szerződésszegés, nem hiányzó funkci�
 | Hatókör | section-instance és block **mezői** | egy kollekció **oszlopa**: `(collectionName, fieldName)` |
 | Manifest-kulcs | `(from-templateVersion → to-templateVersion)` | `(collectionName, from- → to-collectionSchemaVersion)` |
 | Mit ír | a `ContentDoc` egy új revízióját | egy `CollectionDoc` egy új revízióját |
-| Amit **nem** érint | egyetlen kollekció-sort sem | a template-et és az oldal-szintű mezőket sem |
+| Amit **nem** érint | egyetlen kollekció-sort sem **ír**, és egyetlen sor-**értéket** sem olvas (sémát, revíziót, darabszámot és a **kötést** igen — §16.2.2 (c)) | a template-et és az oldal-szintű mezőket sem **írja**; a kötő template-ek `requires` listáit **olvassa** és pineli |
 | Szótár | hat operátor | **két** operátor |
 | Gyakoriság | minden redesign | ritka, szándékosan kiváltott |
 
@@ -1309,7 +1312,11 @@ round-trip **nem** bizonyít invertálhatóságot.
 **Hatókör:** az operátorok **scope-ja** section-instance **vagy** block, és minden esetben az adott
 scope **mezőire** hatnak (a mezőidentitás mindig `(scopeId, fieldName)`, §16.1). A `collection-item`
 **nem operátor-hatókör**, és a kollekció-oszlop sem: a redesign-migráció **egyetlen kollekció-sort
-sem olvas és egyetlen kollekció-értéket sem ír.** A `transform` determinisztikus és
+sem ír és egyetlen sor-ÉRTÉKET sem olvas.** A mondat pontos hatóköre — mert a (c) rész óta a
+tágabb olvasata **hamis** volna: amit a redesign **olvas**, az a kötött kollekciók **sémája,
+revíziója és sor-darabszáma** (a `requires` ellenőrzéséhez és a (c) részhez); amit **átírhat**, az
+a **kötés** — és ezzel az, hogy egy oldal **melyik** sorhalmazt rendereli. Sort és sor-értéket nem
+ír, oszlop-migrációt nem vált ki, kollekció-sémát nem módosít. A `transform` determinisztikus és
 mellékhatás-mentes, hogy a dry-run és a rollback reprodukálható legyen. A `split` és `merge`
 operandusai **kvalifikált** `(scopeId, fieldName)` párok, és minden operandusnak **ugyanabban a
 scope-ban** kell lennie; scope-ok közötti összevonás csak `move` + `merge` láncként fejezhető ki. A
@@ -1331,24 +1338,39 @@ szakaszt megsérti.
 kategóriái (`new-empty / default-filled`) vannak, ami emberi jóváhagyás nélkül nem aktiválható.
 A dry-run diff a jóváhagyás **tárgya és egyben az aktiválás bemenete**: a diff hordozza
 a bázis content-revíziót, a `(from-templateVersion → to-templateVersion)` párt, **és minden kötött
-kollekció `(collectionName, collectionSchemaVersion)` párját** — a régi **és** az új template
-kötései szerint —, és az aktiválás **pontosan** a jóváhagyott diff sorait írja — nem újraszámolt
-eredményt. A kollekció-séma pinelése **nem opcionális**: a redesign dry-runja `UnsatisfiedBinding`-et
-emit, tehát kollekció-sémát **olvas**, és amit olvasott, azt rögzítenie kell. Ha az aktiválás
-pillanatában a content-revízió, bármelyik template-verzió **vagy bármely pinelt kollekció
-`collectionSchemaVersion`-je** eltér a diffben rögzítettől, az aktiválás **elutasítva**
-(`StaleMigration`), és új dry-run kell. Enélkül egy 10:00-kor jóváhagyott redesign és egy 10:05-kor
-aktivált oszlop-migráció (más entitás, más revízió-vonal) 10:10-kor **együtt** landolna, és a
-kötés tartósan kielégítetlen maradna. A pinelés **nem** hozza az aktiválás atomicitási határán belülre
-a `CollectionDoc`-okat: a redesign nem **írja** őket, csak a sémájukat **olvassa**; ezért továbbra is
-igaz, hogy egy párhuzamos **sor-szerkesztés** (ami a sémát nem érinti) a `StaleMigration` ablakát
-**nem** nyitja meg — csak egy párhuzamos **séma-változás** nyitja meg, és az helyesen nyitja meg. Az aktiválás **egyetlen írás,
+kollekció `(collectionName, collectionSchemaVersion, CollectionDoc-revízió, sor-darabszám)`
+négyesét** — a régi **és** az új template kötései szerint —, és az aktiválás **pontosan** a
+jóváhagyott diff sorait írja — nem újraszámolt eredményt. A pinelés **nem opcionális**: a redesign
+dry-runja `UnsatisfiedBinding`-et emit, tehát kollekció-sémát **olvas**, a (c) kötés-szintű rész
+pedig **sor-darabszámot** olvas — és amit olvasott, azt rögzítenie kell. Ha az aktiválás
+pillanatában a content-revízió, bármelyik template-verzió, bármely pinelt kollekció
+`collectionSchemaVersion`-je **vagy bármely pinelt sor-darabszám** eltér a diffben rögzítettől, az
+aktiválás **elutasítva** (`StaleMigration`), és új dry-run kell. Enélkül egy 10:00-kor jóváhagyott
+redesign és egy 10:05-kor aktivált oszlop-migráció (más entitás, más revízió-vonal) 10:10-kor
+**együtt** landolna, és a kötés tartósan kielégítetlen maradna.
+
+**A darabszám pinelése egy korábbi állítást megfordít, és ezt kimondjuk.** A korábbi szöveg azt
+mondta, hogy „egy párhuzamos **sor-szerkesztés** a `StaleMigration` ablakát nem nyitja meg, csak
+egy párhuzamos **séma-változás**". Ez **igaz volt** arra a szövegre, amelyben a redesign a
+kollekciókról **csak sémát** olvasott — de a (c) rész **darabszámot** olvas, és a (c) rész maga
+állítja, hogy a kötés megszűnésének darabszáma „az **egyetlen** hely, ahol az 500 sor eltűnése az
+ember elé kerül". Amit az ember jóváhagy, azt **kötni kell**: egy 10:00-kor „3 sor" felirattal
+jóváhagyott kötés-megszűnés után egy 10:02-es tömeges import 497 sort hozhat, és 10:05-kor **500**
+sor kerülne le az oldalról egy olyan jóváhagyás alatt, ami hármat mondott (1. garancia). A
+szigorítás ezért **pontosan annyi**, amennyi ehhez kell: a `StaleMigration` akkor fire-ol, ha egy
+pinelt **darabszám** megváltozott, **nem** akkor, ha a `CollectionDoc` revíziója változott, de a
+darabszámok azonosak. Egy meglévő sor **értékének** szerkesztése tehát továbbra **sem** nyitja meg
+az ablakot — a jóváhagyott objektum sor-értéket nem hordoz —, a sor **felvétele vagy törlése**
+viszont igen, mert azt **hordoz**. A pinelés emellett továbbra **sem** hozza az aktiválás
+atomicitási határán belülre a `CollectionDoc`-okat: a redesign nem **írja** őket, csak a sémájukat,
+a revíziójukat és a darabszámukat **olvassa**. Az aktiválás **egyetlen írás,
 egyetlen bázis-revízióval** — a §16.4 revision-guard az aktiválásra is vonatkozik. Az aktiválás
 atomicitási határa **egyetlen revízió**: az új content-doc, a **quarantine-rekordok** és a
 `templateVersion`-váltás ugyanabban a revízióban landol. Ha a quarantine nem tud ugyanabban a
 revízióban landolni, a migráció **nem aktiválható**. A `CollectionDoc`-ok **nincsenek** ezen a
 határon belül, mert a redesign nem írja őket; ezért a `StaleMigration` ablakát egy párhuzamos
-**sor-szerkesztés nem nyitja meg.** Az aktiválás után az **előző template- és content-verzió
+**sor-érték-szerkesztés nem nyitja meg** — a sorok **számát** változtató szerkesztés viszont igen,
+a fenti darabszám-pin szerint. Az aktiválás után az **előző template- és content-verzió
 megmarad**, hogy a rollback végrehajtható legyen. A jóváhagyott diffet ezen felül **digest köti** az
 aktiváláshoz — `planDigest`, eltérés esetén `PlanDigestMismatch`, a jóváhagyó identitásával és
 időbélyegével együtt tárolva —; a definíció a §16.2.3 „Mit hagy jóvá az ember" bekezdésében áll, és
@@ -1715,6 +1737,21 @@ bázis-revízióval** (a §16.4 revision-guard alatt), és az új sor-állapot, 
 `collectionSchemaVersion` váltása **ugyanabban a revízióban** landol. Ha nem tudnak együtt landolni,
 a migráció nem aktiválható. Az előző revízió megmarad.
 
+**A terv template-verziókat is pinel.** A fenti pinek **a kollekció** oldalát fedik, a
+`BindingRequirementBreak` viszont a **template** oldalát olvassa (az élő `requires` listákat) — és
+amit a dry-run **olvas**, azt rögzítenie kell, pontosan azzal az indoklással, amivel a §16.2.2 a
+kollekció-sémákat pineli. Ezért a terv felsorolja **minden** olyan template-verzió azonosítóját,
+amely az „élő" definíció alá esik: a publikált snapshot `templateVersion`-jét **és** minden oldal
+draft `templateVersion`-jét, továbbá a `coupledTemplateVersion`-t, ha van. Ha az aktiválás
+pillanatában ezek **bármelyike** eltér a tervben rögzítettől — **akkor is, ha a `CollectionDoc`
+bázis-revíziója és a séma-verziók változatlanok** —, az aktiválás **elutasítva**
+(`StaleMigration`), és új dry-run kell. Enélkül a §16.2.2-ben leírt versenyhelyzet **szimmetrikus
+párja** áll elő: 10:00-kor egy `title → name` oszlop-migráció dry-runja a `tpl_12` `requires`-e
+ellen ellenőriz (amiben nincs `title`) és jóváhagyást kap; 10:05-kor egy külön jóváhagyott redesign
+élővé teszi a `tpl_13`-at, ami **vár** `title`-t; 10:10-kor az oszlop-migráció aktivál — bázis-revízió,
+séma-verziók, digest mind változatlan —, és a kötés **tartósan** kielégítetlen marad. Ott a redesign
+pineli, amit a kollekcióról olvasott; **itt az oszlop-migráció pineli, amit a template-ről olvasott.**
+
 **Mit hagy jóvá az ember, és mi köti az aktiválást ehhez.** Oszlop-hatókörön a jóváhagyás tárgya egy
 **oszlop-szintű terv**, nem érték-szintű íráslista — a diff értéket nem hordoz, csak darabszámot —,
 ezért a §16.2.2 „pontosan a jóváhagyott sorokat írja" mondata itt **oszlop-sorokra** értendő. Hogy ez
@@ -1727,12 +1764,32 @@ ne üres ígéret legyen, három dolog köti:
   újraszámolt eredmény" követelményt. Rejtett, `O(sor)` méretű, előre materializált íráslista
   jóváhagyása **nincs** — az az objektum, amit az ember jóváhagy, ugyanaz, mint amit az aktiválás
   bemenetként kap.
-- **A tervet digest köti.** A jóváhagyott terv kanonikus digestje —
-  `planDigest = digest(bázis-revízió, from → to séma-verzió, a manifest kanonikus alakja, az
-  oszlop-sorok listája a darabszámokkal)` — a jóváhagyással együtt tárolódik, a **jóváhagyó
-  identitásával és időbélyegével**. Az aktiválás a beadott tervből **újraszámolja** a digestet, és
-  eltérés esetén **elutasít** (`PlanDigestMismatch`). **Ugyanez a kötés vonatkozik az oldal-hatókörre
-  is** (§16.2.2 jóváhagyott diffje): előnézet és alkalmazás között a manipuláció így nem korlátlan.
+- **A tervet digest köti — hatókörönként SAJÁT tag-listával.** A digest **köti** az aktiválást, és
+  ez **mindkét** hatókörre áll — de azt, hogy **mit** köt, a hatókör dönti el, és az egyik hatókör
+  tag-listáját a másikra átvinni **szerződésszegés**. Az ok szerkezeti: a két jóváhagyott objektum
+  **nem ugyanaz a fajta objektum** — oszlop-szinten egy **terv**, amit az aktiválás determinisztikusan
+  kifejt, oldal-szinten **maga az íráslista**.
+  - **Oszlop-hatókörön** — `planDigest = digest(bázis-`CollectionDoc`-revízió,
+    `from → to collectionSchemaVersion`, a **cél-séma** kanonikus alakja, a manifest kanonikus
+    alakja, az oszlop-sorok listája a darabszámokkal, a pinelt template-verziók listája)`. Az
+    érték-szintű kifejtés **nem tagja** — mert nem is tagja a jóváhagyott objektumnak: a pinelt
+    bázis és a determinisztikus szabálykészlet **reprodukálja**.
+  - **Oldal-hatókörön** — itt a jóváhagyott objektum maga az íráslista („az aktiválás **pontosan** a
+    jóváhagyott diff sorait írja — nem újraszámolt eredményt"), ezért a digestnek a **diff-dokumentum
+    egészét** kell fednie, nem egy tag-listát, amelynek egyetlen tagja sem fedi a diff sorait:
+    `planDigest = digest(a dry-run diff kanonikus szerializációja)`. A kanonikus szerializáció
+    **kötelezően** tartalmazza a bázis content-revíziót, a `(from- → to-templateVersion)` párt,
+    **mind a három diff-részt** — az (a) forrás-oldali partíció **minden sorát** a kategóriájával, az
+    operátor-láncával és az írandó **értékkel**, a (b) cél-oldali lista minden sorát az
+    alapértékével, és a (c) kötés-szintű rész minden sorát —, valamint minden pinelt
+    `(collectionName, collectionSchemaVersion, CollectionDoc-revízió, sor-darabszám)` négyest. **Egy
+    megtartott sor értékének átírása, egy `quarantined` sor `kept`-re fordítása vagy egy
+    kötés-szintű sor cseréje előnézet és aktiválás között így `PlanDigestMismatch`.** Az
+    oszlop-hatókör tag-listája ezt **nem** fedné le: ott a diff sorai darabszámmal szerepelnek a
+    digest tagjai közt, itt viszont a diff sora **maga az írandó érték**.
+  A digest a jóváhagyással együtt tárolódik, a **jóváhagyó identitásával és időbélyegével**. Az
+  aktiválás a beadott objektumból **újraszámolja** a digestet, és eltérés esetén **elutasít**
+  (`PlanDigestMismatch`). Előnézet és alkalmazás között a manipuláció így nem korlátlan.
 - **A quarantine-ba kerülő értékek a jóváhagyás ELŐTT megtekinthetők.** Minden olyan oszlop-sornál,
   ahol értékek quarantine-ba mennek (`dropColumn`, `type-changed`, `impure-columns`, `orphan`), a
   diff a darabszám mellett **kötelezően** ad egy lapozható, az adott oszlopra szűrt **érték-nézetet**
