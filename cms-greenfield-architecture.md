@@ -283,10 +283,28 @@ importSite(html, assets, js):
   2. a data-cms-* markerekből kiolvassa a slotokat/kollekció-kötéseket/szekciókat
   3. template  := struktúra (slotok üres/prototípus formában) + CSS + JS-bundle
   4. content   := a jelenlegi oldal-szintű értékek kiolvasva a slotokból (fields)
-  5. collections := kötésenként EGY CollectionDoc — séma az item-sablonból + `requires`-ből,
-                    sorok a markupban talált ismétlődésekből (BOOTSTRAP, egyszeri)
+  5. collections := kollekció-NEVENKÉNT egy CollectionDoc — séma a névre hivatkozó ÖSSZES kötés
+                    item-sablonjából + `requires`-éből egyeztetve; sorok az import-manifestben
+                    megnevezett EGY forrás-régió ismétlődéseiből (BOOTSTRAP, egyszeri)
   → tárolás: template (verziózva) + content (névre kulcsolva) + CollectionDoc-ok (külön entitás)
 ```
+
+**Kollekciónként egy `CollectionDoc`, nem kötésenként egy.** A `name` a `siteId`-n belül **egyedi**
+(§16.1), és egy kollekció **több szekcióhoz** is köthető (§3.4) — egy kiemelt rács a `/`-on és a
+teljes lista a `/termekek`-en ugyanazt a `data-cms-collection="termekek"` nevet hordozhatja. A
+kötésenkénti bootstrap ezért vagy megsértené az egyediséget, vagy némán eldobna egy sorhalmazt az
+onboardingon. Helyette:
+
+- **Séma:** a névre hivatkozó **összes** kötés item-sablonja és `requires` listája **egyeztetve**
+  áll össze egy sémává. Ha két kötés **összeegyeztethetetlen** item-alakot deklarál — eltérő
+  mezőnév-halmaz, vagy azonos névhez eltérő típus (akár az elemből inferált, akár a `requires`-ben
+  megadott) —, az import **elutasít** (`AmbiguousCollectionBootstrap`), és a séma **emberi**
+  megadását kéri. Az implementáció **sosem old fel** séma-ütközést szabállyal (nem „a bővebb nyer",
+  nem „az első nyer").
+- **Sorok:** ha a névre **több** kötés is hordoz ismétlődéseket a markupban, az import **elutasít**
+  (`AmbiguousCollectionBootstrap`), amíg a kötelező import-manifest (§15.5 #1) meg nem nevezi, melyik
+  régió a **sorok forrása** (`rowsFrom`). Sorhalmaz **sosem dobódik el** azért, hogy egy második
+  kötés beleférjen — ez pontosan az 1. garancia esete, onboarding-időben.
 
 Az 5. lépés az onboarding **egyetlen** olyan pontja, ahol egy kollekció sémája a designer HTML-jéből
 származik — ez a bootstrap, nem szabály (ADR-004). Innentől a kollekció sémája **önálló**, és a
@@ -1055,7 +1073,8 @@ eljárás és az, hogy miért nem körkörös, a **§16.2.4**-ben áll.
 `collection.schema.json` — required kulcsok, id-formátumok, és a **referenciális integritás**
 (minden `order`-id létezik a `sections`-ben; minden `assetId` létező assetre mutat). A kötés
 integritása **entitás-határon átnyúló**, ezért külön kimondva: minden `sections[*].collection` név
-létező `CollectionDoc`-ra mutat ugyanazon a `siteId`-n, és a szekció-séma `requires` oszloplistája
+létező `CollectionDoc`-ra mutat ugyanazon a `siteId`-n, a `(siteId, name)` párra **pontosan egy**
+`CollectionDoc` létezik (kollekciónként egy, **nem kötésenként** egy — §4.1), és a szekció-séma `requires` oszloplistája
 (§3.4) **kielégül** a kötött kollekció sémájából. Feloldatlan kötés → `UnboundCollection`,
 kielégítetlen oszlop-követelmény → `UnsatisfiedBinding`; mindkettő a publish és a dry-run
 fail-closed hibája (§16.2.1). A spike store-ban ez a check app-szintű (§16.5), a pilotnál DB-szintű.
@@ -1106,8 +1125,17 @@ hordozza, a dry-run szakaszban **elutasításra kerül** (`MixedMigrationScope`)
 `ContentDoc`-ot és `CollectionDoc`-ot ugyanabban a revízióban; ez alól az **egyetlen** kivétel a
 §16.2.4 séma-lift, ami nem migráció, hanem egyszeri áthelyezés.
 
-**Ha egy redesign kollekció-oldali változást igényel, a két lépés sorrendbe tehető, de nem
-összevonható.** Ha az új template olyan oszlopot vár a kötött kollekciótól, ami nincs meg (a
+**Ha egy redesign kollekció-oldali változást igényel, a két lépés csak akkor tehető sorrendbe, ha a
+kollekció-oldali változás *additív*.** Additív az a változás, amely egyetlen **élő** kötés
+`requires` listáját sem sérti — jellemzően új oszlop felvétele. Ilyenkor a sorrend: előbb a
+kollekció-migráció, utána a redesign. **Nem additív** változásnál (egy `requires`-ben szereplő
+oszlop átnevezése vagy eltűnése) a sorrend **egyik iránya sem jó**, és ezt itt kimondjuk, mert a
+korábbi „a két lépés sorrendbe tehető" állítás erre az esetre **hamis** volt: kollekció-először az
+élő template `requires`-e sérül (publish fail-closed `UnsatisfiedBinding` egy olyan előnézet után,
+ami „átnevezve, 4 érték"-et ígért — 3. garancia), template-először pedig ez a szakasz maga utasít el
+(`UnsatisfiedBinding`). A feloldás az **összekapcsolt kiadás** (§16.2.3,
+`BindingRequirementBreak`), nem a sorrend. Ha az új template olyan oszlopot vár a kötött
+kollekciótól, ami nincs meg (a
 szekció-séma `requires` listája nem elégül ki, §3.4), a redesign dry-runja elutasít
 (`UnsatisfiedBinding`), és **előbb** a kollekció-séma-migrációt kell lefuttatni és jóváhagyatni. Ha
 az új template olyan kollekció-nevet köt, amihez nem tartozik `CollectionDoc`, a dry-run elutasít
@@ -1118,6 +1146,20 @@ azért, hogy egy „átnevezés" ne igényeljen entitás-határon átnyúló ír
 kollekció „átnevezése" ezért nem tartalom-migráció, hanem kötés-feloldás — a sorok, az `itemId`-k
 és az értékek érintetlenek maradnak, és ez az, ami a régi szöveg megoldatlan „átnevezett sor
 materializálása" kérdését **tárgytalanná** teszi: sor sosem keletkezik és sosem nevez át migráció.
+
+**„Új kollekciót hoz létre" — ennek a v1-ben nincs automatizált útja, és ez szándékos.** Egy
+kollekció sémájának **két** forrása van, és mindkettő **egyszeri**: az onboarding-bootstrap (§4.1,
+5. lépés) és a séma-lift (§16.2.4). Mindkettő az onboarding pillanatához kötött, és onnantól
+**elzárt**. Ebből következik a fenti `UnboundCollection` escape teljes következménye: egy redesign,
+amely olyan kollekció-nevet köt, amihez nincs `CollectionDoc`, **látható elutasítás**, és a
+v1-ben **nincs olyan út, amely a hiányzó sémát az új HTML item-sablonjából pótolná** — az pontosan
+az, amit az ADR-004 kizár (a template definiálná a sort), és a hátsó ajtón vezetné vissza a
+template-ből származó séma-tulajdonlást. A feloldás **emberi**: vagy egy **létező** kollekció nevére
+kötik a szekciót, vagy a kollekció sémáját **ember adja meg** azon a felületen, amit a
+séma-tulajdonlás kérdésének eldöntése hoz létre (ki birtokolja a kollekció sémáját — nyitott
+v1-döntés, §16.2.3 „veszteségmentes típus-tágítás"). Amíg ez a kérdés nyitott, **az új kollekció
+felvétele nem automatizált művelet**, és a redesign a kötés feloldásáig **blokkolva marad**. Ez a
+szűkítés a 2. garancia ára, és tudatosan vállalt.
 
 #### 16.2.2 Oldal-hatókör — a redesign-migráció
 
@@ -1230,10 +1272,19 @@ szakaszt megsérti.
 **forrás-oldali** kategóriái (`kept / renamed / moved / transformed / quarantined`) és **cél-oldali**
 kategóriái (`new-empty / default-filled`) vannak, ami emberi jóváhagyás nélkül nem aktiválható.
 A dry-run diff a jóváhagyás **tárgya és egyben az aktiválás bemenete**: a diff hordozza
-a bázis content-revíziót és a `(from-templateVersion → to-templateVersion)` párt, és az aktiválás
-**pontosan** a jóváhagyott diff sorait írja — nem újraszámolt eredményt. Ha az aktiválás
-pillanatában a content-revízió vagy bármelyik template-verzió eltér a diffben rögzítettől, az
-aktiválás **elutasítva** (`StaleMigration`), és új dry-run kell. Az aktiválás **egyetlen írás,
+a bázis content-revíziót, a `(from-templateVersion → to-templateVersion)` párt, **és minden kötött
+kollekció `(collectionName, collectionSchemaVersion)` párját** — a régi **és** az új template
+kötései szerint —, és az aktiválás **pontosan** a jóváhagyott diff sorait írja — nem újraszámolt
+eredményt. A kollekció-séma pinelése **nem opcionális**: a redesign dry-runja `UnsatisfiedBinding`-et
+emit, tehát kollekció-sémát **olvas**, és amit olvasott, azt rögzítenie kell. Ha az aktiválás
+pillanatában a content-revízió, bármelyik template-verzió **vagy bármely pinelt kollekció
+`collectionSchemaVersion`-je** eltér a diffben rögzítettől, az aktiválás **elutasítva**
+(`StaleMigration`), és új dry-run kell. Enélkül egy 10:00-kor jóváhagyott redesign és egy 10:05-kor
+aktivált oszlop-migráció (más entitás, más revízió-vonal) 10:10-kor **együtt** landolna, és a
+kötés tartósan kielégítetlen maradna. A pinelés **nem** hozza az aktiválás atomicitási határán belülre
+a `CollectionDoc`-okat: a redesign nem **írja** őket, csak a sémájukat **olvassa**; ezért továbbra is
+igaz, hogy egy párhuzamos **sor-szerkesztés** (ami a sémát nem érinti) a `StaleMigration` ablakát
+**nem** nyitja meg — csak egy párhuzamos **séma-változás** nyitja meg, és az helyesen nyitja meg. Az aktiválás **egyetlen írás,
 egyetlen bázis-revízióval** — a §16.4 revision-guard az aktiválásra is vonatkozik. Az aktiválás
 atomicitási határa **egyetlen revízió**: az új content-doc, a **quarantine-rekordok** és a
 `templateVersion`-váltás ugyanabban a revízióban landol. Ha a quarantine nem tud ugyanabban a
@@ -1242,7 +1293,7 @@ határon belül, mert a redesign nem írja őket; ezért a `StaleMigration` abla
 **sor-szerkesztés nem nyitja meg.** Az aktiválás után az **előző template- és content-verzió
 megmarad**, hogy a rollback végrehajtható legyen.
 
-A dry-run diff két részből áll. (a) A **forrás-oldali partíció**: minden tárolt forrásérték —
+A dry-run diff **három** részből áll. (a) A **forrás-oldali partíció**: minden tárolt forrásérték —
 `(locale, scopeId, fieldName)` — **pontosan egy** kategóriába kerül az **öt forrás-oldali** közül, és
 a sora felsorolja a rá alkalmazott teljes operátor-láncot. Több operátor esetén a sor a legerősebb
 kategóriában jelenik meg (quarantined > transformed > moved > renamed > kept). Egy `merge`
@@ -1251,6 +1302,31 @@ forrása `transformed`. (b) A **cél-oldali lista**: azok az új vagy megmaradó
 semmilyen forrásérték nem érkezik — `new-empty`, ha nincs kitöltésük, `default-filled`, ha a
 manifest explicit alapértéket ad. A cél-oldali lista **nem** a forrás-oldali kategóriák része, és nem tartalmaz
 forrásértéket.
+
+(c) A **kötés-szintű rész.** A redesign egyetlen kollekció-sort sem ír — de a **kötéseket** átírhatja,
+és egy kötés átirányítása vagy megszűnése egész sorhalmazokat vesz le az oldalról vagy tesz rá, úgy,
+hogy közben **egyetlen forrás-oldali diff-sor sem keletkezik**: a `sections[*].collection` kötés nem
+tárolt mezőérték és nem slot. Ezért a diffnek **harmadik, kötés-szintű része van**, és ez a rész
+**akkor sem hagyható el, ha az (a) és a (b) rész üres.** A kötés-szintű rész `(pageId,
+sectionInstanceId)` szinten sorolja fel a **hozzáadott**, a **megszűnt** és az **átirányított**
+kötéseket, mindegyiknél a kollekció nevével (átirányításnál a régi **és** az új névvel), a kollekció
+`collectionSchemaVersion`-jével és az **érintett sorok darabszámával**. A darabszám a `CollectionDoc`
+sémájából és sorszámából olvasódik ki; a kötés-szintű rész **sorértéket sosem olvas és sosem
+jelenít meg** — a „a redesign egyetlen kollekció-értéket sem olvas" állítás az **értékekre**
+vonatkozik, a puszta darabszám nem érték. **Üres kötés-szintű rész csak akkor áll elő, ha a kötések
+halmaza bitre azonos.**
+
+Egy kötés **átirányítása** — ugyanaz a `sectionInstanceId` a régi és az új template-ben, de más
+`collection` név — **explicit manifest-bejegyzést igényel**: `rebindCollection: sectionInstanceId:
+régi-név → új-név`. Manifest-bejegyzés nélküli átirányítás a dry-run szakaszban a **teljes migrációt
+elutasítja** (`UnapprovedRebind`). Az ok a 2. garancia, entitás-szinten: hogy **melyik sorhalmaz
+jelenik meg** egy szekcióban, azt **sosem vezetjük le** abból, hogy az új HTML mást ír — pontosan
+úgy, ahogy egy scope átnevezéséhez `move` kell. A `rebindCollection` **nem hetedik operátor**: nem
+mozgat és nem alakít értéket, egyetlen sort sem olvas, ír vagy quarantine-ol — a kötés-változás
+**kimondása**, a szótár hat operátora változatlan (§16.2.1). Egy kötés **megszűnése** (a
+szekció-példány eltűnik, vagy elveszti a `collection` kötését) szintén **kötelező** kötés-szintű
+diff-sor a darabszámmal; ha az érintett szekció-példánynak **nincs** oldal-szintű mezője, ez az
+**egyetlen** hely, ahol az 500 sor eltűnése az ember elé kerül (1. garancia).
 
 #### 16.2.3 Kollekció-hatókör — az oszlop-migráció
 
@@ -1331,6 +1407,29 @@ forrású és célú `renameColumn: (c,f) → (c,f)` bejegyzéssel mondható ki;
 maradék**, és nincs rá operátor: az oszlop minden értéke quarantine-ba kerül (`type-changed`), az
 oszlop a migráció után **érték nélkül** áll, és a diff ezt oszlop-sorként, az érintett értékek
 számával mutatja. Ez látható elutasítás, nem veszteség.
+
+**A kötés-követelmény sérülése kötelező elutasítás (`BindingRequirementBreak`).** A §16.1
+invariánsa szerint a szekció-séma `requires` listájának ki kell elégülnie a kötött kollekció
+sémájából. Ezt a kollekció-oldali migráció **el tudja rontani**, és a rontás következménye nem
+quarantine, hanem **publikálhatatlan oldal** — olyan kimenet, amit az előnézet („átnevezve, 4
+érték") nem írt le. Ezért: a dry-run kiszámítja a **migráció utáni** sémát, és ellenőrzi, hogy az
+kielégíti-e **minden**, az **aktuálisan élő** template-verzióban erre a kollekcióra kötött szekció
+`requires` listáját (név **és** típus szerint). Ha nem, a dry-run **elutasítja a teljes migrációt**
+(`BindingRequirementBreak`), **hacsak** a manifest meg nem nevez egy **összekapcsolt
+template-verziót** (`coupledTemplateVersion`).
+
+**Az összekapcsolt kiadás.** A `coupledTemplateVersion` egy **már elkészített, validált, de még nem
+élő** template-verzió. A dry-run ekkor a **migráció utáni** sémát **ennek** a template-verziónak a
+`requires` listái ellen ellenőrzi, és az elfogadott terv **egyetlen jóváhagyás** alá esik, amely
+**mindkét** aktiválást lefedi. Végrehajtás: (1) a `CollectionDoc` új revíziója landol; (2) a
+`ContentDoc` a `coupledTemplateVersion`-re vált, a §16.2.2 redesign-szerződése szerint. A két írás
+között a **publish blokkolva van** (§16.4), és a köztes állapotból **nem készül snapshot**. Ha a
+(2) elbukik, az (1) **revízió-visszaállítással visszavonódik** (4. garancia), és ez naplózott
+esemény, nem néma állapot. **Ez nem kivétel a §16.2.1 tilalma alól:** nem egy revízióban ír két
+entitást, hanem két, saját revízió-vonalán landoló írást köt **egyetlen jóváhagyáshoz és egyetlen
+publish-ablakhoz**; az egyetlen entitás-határon átnyúló **írás** továbbra is a §16.2.4 lift. Az
+összekapcsolt kiadás nélkül egy `requires`-ben szereplő oszlop átnevezése **nem futtatható** —
+sem előbb, sem utóbb (§16.2.1).
 
 **Új oszlop.** A cél-oldali listán jelenik meg: `new-empty`, ha nincs kitöltése, `default-filled`, ha
 a manifest **explicit** alapértéket ad. Az implementáció **sosem talál ki alapértéket** (üres string
