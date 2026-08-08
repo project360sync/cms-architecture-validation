@@ -334,7 +334,7 @@ Két render-mód kell, és a template manifestje dönti el, melyik érvényes:
   mount-pointba fűzi.
 
 ```ts
-function render(template, content, collections): Html {
+function render(template, content, collections, locale): Html {   // NÉGY paraméter (§16.1)
   validateReferences(template.manifest, content, collections)  // kötések + `requires` (§16.1)
   const doc = load(template.shell)
   const mount = template.mode === "composable"
@@ -357,6 +357,11 @@ function render(template, content, collections): Html {
   return serialize(doc)
 }
 ```
+
+A szignatúra **négy** paraméteres: a render **locale-onként egyszer** fut (§14.1), és a hidratálás a
+§14.2 `resolve(field, locale)`-ján megy át — a `locale` tehát a render **bemenete**, nem a
+`content`-ből kikövetkeztetett érték. Ez a §16.1 szignatúrája; a korábbi három paraméteres alak
+elírás volt.
 
 A kollekció-render ugyanezt a szabályt követi: a `<template data-cms-item>` **contentjét**
 klónozza (nem magát a `<template>` elemet) a **kötött kollekció** minden sorára, a sor saját,
@@ -926,7 +931,7 @@ jobban szolgálja.
 | 5 | **Production baseline: Postgres + object storage; a spike maradhat Mongón.** | A revision, audit, jogosultság, publish pointer és referenciális integritás relációs. JSONB jó verziózott content-snapshotnak, de nem helyettesíti az alkalmazás-sémát. Bináris asset nem adatbázisba kerül. A persistence-migráció nem része a mag-tézist vizsgáló spike-nak (§15.7). |
 | 6 | **Inline a kiválasztás és gyors text/asset edit; panel a teljes, kanonikus űrlap.** | Így az inline élmény nem hoz létre második validációs útvonalat. Strukturált richtext, URL, select, color, boolean, SEO és hibajavítás panelben történik. |
 | 7 | **Agnosztikus a build-outputnál, nem a forrás-frameworknél.** | A bemeneti szerződés renderelt statikus HTML/CSS + támogatott ES bundle + manifest. React/Vue runtime, szerverkomponens vagy tetszőleges app-kód importja már platform/runtime termék lenne. |
-| 8 | **Média immutable asset-id-val kötődik.** | A mező locale-specifikus alt/caption/crop metaadatot, nem fájl-URL-t tárol. Soft delete + reference graph + retention után GC; re-ingeszt asset-id-t reconciliál. |
+| 8 | **Média immutable asset-id-val kötődik.** | A mező locale-specifikus alt/caption/crop metaadatot, nem fájl-URL-t tárol. Soft delete + reference graph + retention után GC; a re-ingeszt az **oldal-szintű** asset-hivatkozásokat reconciliálja — a kollekció-sorok `assets` bejegyzéseit **nem olvassa és nem írja** (ADR-004, §4.4), azok a `CollectionDoc` saját revízió-vonalán élnek. |
 | 9 | **Template-import privilegizált build, content-edit nem kód.** | Külön jogosultság, izolált fetch/unpack/build, külön preview origin; minden content-írás ugyanazon tipizált command API-n megy át. |
 | 10 | **Revision-alapú draft, atomi release pointer.** | V1-ben az autosave kizárólagos edit-lock alatt ír immutable draft revisiont; kollaboratív módban ETag/lost-update kontroll kell. A publish mindkét esetben validált site/locale snapshotot aktivál, nem fájlonként frissíti az élő oldalt. |
 
@@ -1344,7 +1349,10 @@ atomicitási határa **egyetlen revízió**: az új content-doc, a **quarantine-
 revízióban landolni, a migráció **nem aktiválható**. A `CollectionDoc`-ok **nincsenek** ezen a
 határon belül, mert a redesign nem írja őket; ezért a `StaleMigration` ablakát egy párhuzamos
 **sor-szerkesztés nem nyitja meg.** Az aktiválás után az **előző template- és content-verzió
-megmarad**, hogy a rollback végrehajtható legyen.
+megmarad**, hogy a rollback végrehajtható legyen. A jóváhagyott diffet ezen felül **digest köti** az
+aktiváláshoz — `planDigest`, eltérés esetén `PlanDigestMismatch`, a jóváhagyó identitásával és
+időbélyegével együtt tárolva —; a definíció a §16.2.3 „Mit hagy jóvá az ember" bekezdésében áll, és
+**mindkét hatókörre** vonatkozik.
 
 A dry-run diff **három** részből áll. (a) A **forrás-oldali partíció**: minden tárolt forrásérték —
 `(locale, scopeId, fieldName)` — **pontosan egy** kategóriába kerül az **öt forrás-oldali** közül, és
@@ -1766,8 +1774,8 @@ következő **nyolc** szabály mondja meg, hogyan.
    pontosan a v3 alak**, tehát a 3. szabály átengedné, a 2. szabály digestje pedig csak a lift
    **saját** bemenetét hasonlítja a **saját** kimenetéhez — a meglévő `CollectionDoc`-hoz **soha**.
    Enélkül a második futás a v3 avult értékeit írná új revízióként a lift utáni szerkesztések fölé,
-   némán. A 7. szabály „idempotensen újrafuttatható" állítása ezért **pontosan egy** esetre szól:
-   ha az (1)–(2) írás megtörtént, de a (3) elbukott. Ekkor az újrafuttatás **folytatásként**
+   némán. A lift **újrafuttathatósága** ezért **pontosan egy** esetre szól — nem általános
+   idempotenciáról van szó: ha az (1)–(2) írás megtörtént, de a (3) elbukott. Ekkor az újrafuttatás **folytatásként**
    engedélyezett, de **csak** akkor, ha a meglévő `CollectionDoc`-ok tartalom-hash-e **bitre
    egyezik** azzal, amit az aktuális forrás előállítana; ha nem, a lift elutasít
    (`LiftResumeMismatch`), és emberi döntést kér. Automatikus felülírás nincs.
@@ -1829,6 +1837,17 @@ concurrency nélkül:
   megerősítés; token/ráta/rekurzió limit a read→write→re-read hurokra; az audit-log
   **megkülönbözteti** az AI- és ember-írást a közös re-entráns lock alatt is.
 - **Admin force-unlock:** **fencing-token**, hogy a lejárt lock késői írása ne érvényesüljön.
+- **A `CollectionDoc` revízió-granularitása: egész dokumentum.** Egy `CollectionDoc` revízió-vonala
+  **dokumentum-szintű**, nem soronkénti — ez normatív, nem implementációs részlet: sor-szintű
+  revíziózás mellett a §16.2.3 `StaleMigration`-je értelmét vesztené, mert nem lenne **egy** bázis,
+  amihez az aktiválás hasonlíthat. Minden sor-írás is a **teljes dokumentum** bázis-revízióját
+  hordozza, és stale bázissal elutasításra kerül.
+- **Zárolás oszlop-migráció alatt.** A §15.7 pesszimista edit-lockja oldal-szintű; a kollekció
+  ugyanezt **kollekció-szinten** kapja: a dry-run jóváhagyásától az aktiválás végéig a kollekció
+  szerkesztése **blokkolva/sorolva** van („épp migrálunk…"), ugyanúgy, ahogy a §15.7 a publish alatti
+  editet blokkolja. Ez **nem** váltja ki a revision-guardot: TTL-lejárat vagy force-unlock után is a
+  bázis-revízió dönt (`StaleMigration`). Ugyanez a blokk fedi a §16.2.3 **összekapcsolt kiadásának**
+  két írása közötti ablakot.
 
 ### 16.5 Store — a §15.5 #5 ⟂ §15.7 szóhasználat feloldva
 
