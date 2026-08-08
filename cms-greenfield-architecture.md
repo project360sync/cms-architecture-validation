@@ -183,10 +183,8 @@ címkével, alapértékkel, validációval. Ez adja a gazdag editor-UI-t + a val
     { "id": "line2", "type": "text",     "label": "2. sor",  "max": 12 },
     { "id": "sub",   "type": "richtext", "label": "Alcím" }
   ],
-  "permissions": {
+  "permissions": {                 // SZEKCIÓ-szintű; sor-jogosultság NINCS itt (§16.1)
     "editContent": true,
-    "addItems": false,
-    "reorderItems": false,
     "moveSection": false,
     "removeSection": false,
     "duplicateSection": false,
@@ -214,10 +212,8 @@ címkével, alapértékkel, validációval. Ez adja a gazdag editor-UI-t + a val
       { "name": "desc",  "type": "longtext" }
     ]
   },
-  "permissions": {
+  "permissions": {                 // SZEKCIÓ-szintű; az addItems/reorderItems a CollectionDoc-é
     "editContent": true,
-    "addItems": true,
-    "reorderItems": true,
     "moveSection": true,
     "removeSection": true,
     "duplicateSection": true,
@@ -245,6 +241,19 @@ hibája (`UnsatisfiedBinding` / `UnboundCollection`, §16.2.1); az implementáci
 hiányzó oszlopot a szekció-sémából. A kollekció sémájának módosítása külön migráció, saját szűk
 szótárral (§16.2.3).
 
+**A sor-jogosultság a kollekcióé, nem a szekcióé (ADR-004).** Az `addItems` / `reorderItems`
+permission ezért **kikerült** a szekció-sémából: a sorok élete a kollekció saját felületén zajlik
+(§16.2.2 zárómondata), és mivel egy kollekció **több szekcióhoz** is köthető, egy szekció-oldali
+sor-permission vagy uniót, vagy metszetet, vagy semmit jelentene — három védhető, de **különböző**
+válasz ugyanarra a kérdésre, ami az authz-ban nem elfogadható. A normatív hely a `CollectionDoc`
+`permissions` blokkja (§16.1): `editRows`, `addItems`, `removeItems`, `reorderItems`. **Egy
+szekció-kötés önmagában semmilyen sor-jogosultságot nem ad.** A szekció felől csak **szűkítés**
+jöhet, capabilityn keresztül: az editor akkor és csak akkor ajánlja fel a sor-átrendezést, ha a
+kollekció `permissions.reorderItems`-e igaz **és** a kollekcióra kötött **minden** szekció
+`capabilities.reorderSafe`-je igaz — **metszet, nem unió** (§3.4.1); ugyanígy a felvételre
+`duplicationSafe`, a törlésre `removalSafe`. Így a §5 szerveroldali elutasítása is
+**végrehajtható**: van **egy** policy, amit konzultálni lehet, és az a kollekcióé.
+
 #### 3.4.1 Permission és capability nem ugyanaz
 
 - A **permission** azt mondja meg, mit ajánl fel az editor az adott szerepkörnek.
@@ -265,7 +274,8 @@ Ez három gyakorlati lockot eredményez, amelyek egymástól függetlenek:
 
 Egy pozíció-lockolt hero tartalma tehát továbbra is szerkeszthető lehet. Egy lockolt
 sectionön belüli kollekció elemei is lehetnek hozzáadhatók és rendezhetők, miközben maga
-a section nem mozdítható.
+a section nem mozdítható — de a sor-jogosultság forrása ilyenkor is a `CollectionDoc`
+`permissions` blokkja (§3.4, §16.1), a szekció csak a capabilityjével **szűkíthet** rajta.
 
 ---
 
@@ -408,9 +418,12 @@ aktiválható; rollbackhez az előző template + content verzió együtt marad m
 
 ## 5. Editor-modell (client-safe)
 
-- **Granularis szerkeszthetőség** (per section/blokk, a manifestből): külön content-,
-  item- és kompozíciós permissionök. Az editor nem egyetlen `locked` flagből következtet.
-  A tiltott műveletet nem ajánlja fel, és az API ugyanazt szerveroldalon is elutasítja.
+- **Granularis szerkeszthetőség** (per section/blokk, a manifestből): külön content- és
+  kompozíciós permissionök; a **sor-** (item-) permissionök forrása a `CollectionDoc`
+  `permissions` blokkja, nem a szekció-séma (§3.4, §16.1). Az editor nem egyetlen `locked`
+  flagből következtet.
+  A tiltott műveletet nem ajánlja fel, és az API ugyanazt szerveroldalon is elutasítja — sor-műveletnél
+  a **kollekció** policyját konzultálva, a kötött szekciók capabilityjeivel metszve.
   A UI megmutathatja a lock okát (például „a hero animáció miatt nem mozgatható").
 - **Hibrid szerkesztő:**
   - **Inline click-to-edit** a szöveg/kép slotokra (a valódi oldalon kattint).
@@ -675,6 +688,18 @@ function resolve(field, locale, content) {
 translation.stale =
   digest(sourceValueNow, contextNow, fieldSchemaVersion) !== translation.sourceDigest
 ```
+
+**A policy és a `resolve()` a sor-értékekre is vonatkozik (ADR-004).** A fenti `resolve(field, locale,
+content)` alak `ContentDoc`-ra, oldal-szintű mezőkre íródott (`content[locale]?.fields[field]`). A
+sorok kikerülésével ugyanez a szemantika **változatlanul** vonatkozik a `(collectionName, itemId,
+locale, fieldName)` négyesre is: a feloldás a `CollectionDoc` `rows[*].fields[locale][name]`
+bejegyzésén (és `image` oszlopnál az `assets[name].alt[locale]`-on) megy át, a `CollectionDoc` séma
+`required` / `altRequired` kulcsa **a kötelező eset**, a `fallbackAllowed` / `hiddenWhenMissing`
+kollekcióra és oszlopra ugyanúgy deklarálható, és egy hiányzó kötelező **sor-érték** ugyanúgy
+bukathatja a locale publikálását (`UnpublishableLocale`), mint egy oldal-szintű mező. **Ez az
+egyetlen hely, ahol a sorok kötelezőségét a rendszer érvényesíti**, és a §16.2.3
+`RequiredWithoutDefault` záró-ellenőrzése erre a definícióra hivatkozik — enélkül a draft-quarantine
+megszüntetésének (c) premisszája nem állna.
 
 Fallback **previewban** hasznos, de publikálásnál nem lehet univerzális alapértelmezés:
 kevert nyelvű oldal SEO-, jogi és márkakockázat. A publish policy oldal/mező szinten
@@ -1010,6 +1035,26 @@ Identity-szintek (mind explicit, egyik sem pozícióból származtatott):
 - **A struktúra (order / type / collection-kötés / oszlopnév) locale-független; csak a mezőértékek
   locale-scoped-ek.** Kivétel a `composable` per-locale order (§14.4): külön, opcionális felülírás —
   nem az alap.
+- **A név-egyenlőség definiált: NFC + kódpont-egyezés, kis-nagybetű-érzékenyen.** Két mező- vagy
+  oszlopnév akkor és csak akkor **azonos**, ha **Unicode NFC** normalizálás után **kódpontonként**
+  egyezik; a tárolt alak mindig NFC. Megengedett karakterosztály: Unicode betűvel kezdődik, utána
+  Unicode betű / számjegy / `_`, legfeljebb 64 kódpont; ezen kívüli név **séma- és import-validációs
+  hiba** (`InvalidColumnName`), nem néma normalizálás. Ha egy sémán belül két oszlopnév NFC után
+  **csak kis-nagybetűben** tér el, az szintén hiba (`AmbiguousColumnName`). Ez azért invariáns és nem
+  implementációs részlet, mert a név-egyenlőség dönti el a tiszta-oszlophalmaz szabályt, az
+  auto-matchet és a foglaltságot (§16.2.3): egy NFD/NFC eltérés különben az egész kollekciót „nem
+  tiszta" halmazzá tenné, és **minden** értékét quarantine-ba küldené, miközben egy másik
+  implementáció **semmilyen** változást nem látna.
+- **A sor `locales` szűkítése struktúra, de nem oszlop.** Egy sor opcionálisan hordozhat
+  `locales: ["de"]` listát — a §14.3 locale-specifikus sor kivétele —, és ez a kulcs **része a
+  kanonikus alaknak** (a `collection.schema.json` engedi és validálja). **Nem oszlop:** nincs a
+  `schema.columns` listában, az oszlop-szótár (§16.2.3) **nem címzi**, `renameColumn` /
+  `dropColumn` nem hat rá, és sosem kerül quarantine-ba. Hiányzó `locales` = a sor minden locale-ban
+  látszik. A lista szerkesztése **sor-életciklus**, azaz hétköznapi szerkesztés.
+- **A sor-jogosultság a `CollectionDoc`-é.** Az `addItems` / `removeItems` / `reorderItems` /
+  `editRows` permission a kollekció saját `permissions` blokkjában él, nem a szekció-sémában (§3.4):
+  egy kollekció több szekcióhoz köthető, és egy szekció-oldali sor-permission uniót, metszetet vagy
+  semmit jelentene — három védhető, de különböző válasz ugyanarra a kérdésre.
 
 **Kanonikus váz — `ContentDoc`** (egy oldal, két locale, egy kollekció-kötés):
 
@@ -1054,8 +1099,12 @@ Identity-szintek (mind explicit, egyik sem pozícióból származtatott):
       { "name": "img",   "type": "image",    "altRequired": true }
     ]
   },
+  "permissions": {                           // SOR-jogosultság — a kollekcióé, nem a szekcióé (§3.4)
+    "editRows": true, "addItems": true, "removeItems": true, "reorderItems": true
+  },
   "rows": [
     { "id": "itm_7f3a",
+      // "locales": ["de"],                  // OPCIONÁLIS locale-szűkítés (§14.3) — nem oszlop
       "fields": { "hu": { "title": "Berg Passive", "desc": "Uw=0,66" },
                   "en": { "title": "Berg Passive", "desc": "Uw=0.66" } },
       "assets": { "img": { "assetId": "ast_abc", "alt": { "hu": "…", "en": "…" } } } }
@@ -1070,8 +1119,12 @@ látszott. A `4` **ez a lépés**: a `collections` kulcs eltávolítása a `Cont
 eljárás és az, hogy miért nem körkörös, a **§16.2.4**-ben áll.
 
 **JSON Schema a spike előtt.** Két séma rögzíti a fenti alakokat: `content.schema.json` és
-`collection.schema.json` — required kulcsok, id-formátumok, és a **referenciális integritás**
-(minden `order`-id létezik a `sections`-ben; minden `assetId` létező assetre mutat). A kötés
+`collection.schema.json` — required kulcsok, id-formátumok, a **referenciális integritás**
+(minden `order`-id létezik a `sections`-ben; minden `assetId` létező assetre mutat) és a
+**séma-konformancia**: egy `CollectionDoc` sorai **nem hordozhatnak** olyan kulcsot, ami a doc saját
+`schema.columns` listájában nincs benne — sem `rows[*].fields[locale]`-ben, sem `rows[*].assets`-ben
+—, és a hordozott érték alakja a deklarált típusnak felel meg. (Ez teszi ellenőrizhetővé a §16.2.3
+`dropColumn` kulcs-eltávolítását: „árva" kulcs nem maradhat a sorban.) A kötés
 integritása **entitás-határon átnyúló**, ezért külön kimondva: minden `sections[*].collection` név
 létező `CollectionDoc`-ra mutat ugyanazon a `siteId`-n, a `(siteId, name)` párra **pontosan egy**
 `CollectionDoc` létezik (kollekciónként egy, **nem kötésenként** egy — §4.1), és a szekció-séma `requires` oszloplistája
@@ -1337,17 +1390,42 @@ kiértékelése ezért **sem a sorok számától, sem a locale-ok számától ne
 legfontosabb állítása, és normatív: **a sorok száma soha többé nem lehet az operátor-kiértékelés
 szorzója.**
 
-**Az elutasítás a sémapárból dől el, adat olvasása előtt.** Minden alábbi elutasítás kizárólag a
-`(from-collectionSchemaVersion, to-collectionSchemaVersion)` sémapárból és a manifestből számítható.
-Egy elutasított migráció **nem olvas sorokat.** (A korábbi szöveg alatt a *refusal* volt a drágább
-út; ez itt szerkezetileg kizárva.)
+**Az elutasításoknak két osztálya van, és csak az egyik olvas adatot.** A szakasz elutasításainak
+**túlnyomó többsége séma-pár elutasítás**: kizárólag a `(from-collectionSchemaVersion,
+to-collectionSchemaVersion)` sémapárból és a manifestből számítható, **egyetlen sor olvasása
+nélkül**. **Pontosan egy** osztály adatfüggő, és ezt itt nevesítjük — enélkül a szakasz önmagának
+mondana ellent, mert a `renameColumn` foglaltsági elutasítása („`b` a migráció előtt **bármely**
+sorban értéket hordoz") egzisztenciális állítás a sorok fölött.
+
+- **Séma-pár elutasítások** (adat nélkül): ismeretlen forrás- vagy céloszlop; típuseltérés; a
+  `dropColumn` célja mégis szerepel az új sémában; két bejegyzés egy céloszlopra
+  (`ColumnTargetConflict`); verzió-lépés (`UnbridgedCollectionVersionGap`); vegyes hatókör
+  (`MixedMigrationScope`); érvénytelen vagy ütköző oszlopnév (`InvalidColumnName` /
+  `AmbiguousColumnName`); kötés-követelmény sérülése (`BindingRequirementBreak`).
+- **A foglaltság-predikátum — az egyetlen adatfüggő elutasítás.** A `renameColumn` céloszlopának
+  foglaltsága és a lenti `RequiredWithoutDefault` záró-ellenőrzés **nem** dönthető el a sémapárból.
+  Ez **egzisztenciális jelenlét-predikátum**: „van-e legalább egy sor (és publikálandó locale), ahol
+  az oszlop értéket hordoz". Az implementáció **csak ezt** olvashatja — a **jelenlétet**, nem a
+  **tartalmat** —, és **csak a manifesttel érintett oszlopokra**. **Séma-jelenléttel való közelítés
+  tilos**: egy deklarált, de üres oszlop **nem foglalt** (ilyet a `type-changed` és a lift 5.
+  szabálya is előállít), és a közelítés két implementációt ellentétes válaszra vezetne ugyanazon a
+  manifesten.
+
+Ami ebből változatlanul áll: a **korábbi** szöveg drága refusal-útja szerkezetileg kizárva marad —
+egy elutasítás **sosem futtat operátor-kiértékelést sorokon**, legfeljebb egy jelenlét-tesztet.
 
 **A szótár — két operátor, és nincs harmadik:**
 
 | Operátor | Szemantika | Kötelező elutasítások |
 |---|---|---|
 | `renameColumn` | `(c, a) → (c, b)`; minden sor minden locale-jában, **az érték változatlan** | ha `a` nincs a régi sémában; ha `b` nincs az újban; ha `b` **típusa** eltér `a` típusától; ha `b` a migráció előtt **bármely** sorban értéket hordoz, amit egyetlen manifest-bejegyzés sem fogyaszt el forrásként (foglaltság); ha két bejegyzés ugyanarra a céloszlopra ír |
-| `dropColumn` | `(c, a) → quarantine`; az oszlop minden értéke rekordba kerül, nem hard-törlés | ha `a` nincs a régi sémában; ha `a` **benne van** az új sémában (akkor nem eltűnés, a bejegyzés hazudik); ha a quarantine nem tud ugyanabban a revízióban landolni |
+| `dropColumn` | `(c, a) → quarantine`; az oszlop minden értéke rekordba kerül (nem hard-törlés), a **kulcsa** viszont minden sorból eltűnik | ha `a` nincs a régi sémában; ha `a` **benne van** az új sémában (akkor nem eltűnés, a bejegyzés hazudik) |
+
+A `dropColumn` korábbi harmadik cellája — „ha a quarantine nem tud ugyanabban a revízióban landolni"
+— **nem dry-run feltétel**, hanem **aktiválás-idejű atomicitási** feltétel; a helye a lenti
+„Dry-run, jóváhagyás, aktiválás" bekezdés, és a következménye ott áll: a migráció **nem
+aktiválható**. Egy dry-run-listába keverve azt sugallta, hogy a séma-pár elutasítások futásidejű
+állapotot olvasnak.
 
 A két operátor neve **szándékosan különbözik** az oldal-hatókör `rename`/`delete` operátoraitól: nem
 ugyanazok, nem cserélhetők fel, és nem szabad közös **implementációt** feltételezni közöttük.
@@ -1433,9 +1511,57 @@ sem előbb, sem utóbb (§16.2.1).
 
 **Új oszlop.** A cél-oldali listán jelenik meg: `new-empty`, ha nincs kitöltése, `default-filled`, ha
 a manifest **explicit** alapértéket ad. Az implementáció **sosem talál ki alapértéket** (üres string
-sem alapérték). Egy `required: true` oszlop, amihez a manifest nem ad alapértéket, a **dry-run
-szakaszban elutasítja a teljes migrációt** (`RequiredWithoutDefault`) — sor tehát **nem kerülhet**
-migráció miatt publikálásból kizárt állapotba.
+sem alapérték).
+
+**Publikálhatósági záró-ellenőrzés (`RequiredWithoutDefault`) — a szakasz harmadik kötelező
+elutasítása.** Az az ígéret, hogy „sor nem kerülhet migráció miatt publikálásból kizárt állapotba",
+**nem** egy új oszlopra szóló mellékfeltétel: **négy** út vezet oda, és mind a négyet ugyanez az
+egy, a kategorizálás **után** futó ellenőrzés zárja le. A dry-run elutasítja a **teljes migrációt**,
+ha a **cél-sémában** van olyan `required: true` (vagy `image` oszlopnál `altRequired: true`) oszlop,
+amely a migráció után **legalább egy sorban, legalább egy publikálandó locale-ban érték nélkül
+állna**, és a manifest nem ad hozzá **explicit alapértéket**. A négy út:
+
+1. **Új kötelező oszlop** alapérték nélkül (ez volt eddig is kimondva);
+2. **Kötelezővé tétel** — egy **meglévő** oszlop `required: false → true` (vagy `altRequired:
+   false → true`) váltása. Ez **nem** típusváltás, tehát az auto-match maradékként vinné tovább, és
+   a régi szöveg épp ezt az esetet nevesítette a draft-quarantine indoklásaként. Ha minden sor
+   minden érintett locale-ban értéket hordoz, a kötelezővé tétel **átmegy**; ha akár egy cella üres,
+   **alapérték nélkül nincs kötelezővé tétel**;
+3. **`type-changed` egy kötelező oszlopon** — az értékek quarantine-ba mennek, az oszlop kötelező
+   marad, tehát minden sor publikálhatatlan lenne;
+4. **`impure-columns` miatt fedezetlen kötelező oszlop** — bármely átnevezés **konstrukció szerint**
+   nem tisztává teszi a halmazt, és az így fedezetlenül maradó kötelező oszlop üresen állna elő.
+
+Az „érték nélkül állna legalább egy sorban" kérdés **adatfüggő** — a foglaltság-predikátum
+osztályába tartozik, lásd az elutasítások két osztályát fentebb —, és a „publikálandó locale"
+jelentését a §14.2 publish-policy adja, amely a sor-értékekre a `(collectionName, itemId, locale,
+fieldName)` négyesen ugyanúgy érvényes, mint az oldal-szintű mezőkre. **Ez a hivatkozás
+kötelező:** enélkül a draft-quarantine megszüntetésének (c) premisszája — hogy a hiányzó
+kötelező érték publikálás-blokkolása a §14.2 dolga — nem állna, mert a §14.2 önmagában csak
+`ContentDoc`-alakú mezőkről beszélne.
+
+**A `dropColumn` a kulcsot is elviszi.** A „nem hard-törlés" **az értékre** vonatkozik: az érték a
+quarantine-rekordban él tovább. A **sorokban** viszont a `dropColumn` ugyanabban a revízióban
+**eltávolítja a kulcsot** minden sor minden locale-jából (és `image` oszlopnál az `assets`
+bejegyzést is). Enélkül egy hónapokkal későbbi, **azonos nevű új** oszlop — amit a cél-oldali lista
+`new-empty`-ként ír le — a régi szövegeket **feltámasztaná** az előnézet ellenében (3. garancia), és
+a foglaltság-predikátum jelentése is némán megváltozna. A megmaradt kulcs egyébként is sértené a
+§16.1 séma-konformancia invariánsát.
+
+**Asset-oszlopok — egy oszlop értéke két helyen áll.** Egy `image` típusú oszlop **értéke** a
+`rows[*].fields[locale][name]` bejegyzés **és** a `rows[*].assets[name]` bejegyzés (`assetId` +
+locale-onkénti `alt`) **együtt**; a szótár szabályai az **egészre** vonatkoznak. Ebből:
+
+- a `renameColumn` **mindkettőt** átnevezi — a `fields` kulcsot minden locale-ban **és** az `assets`
+  kulcsot. Csak az egyiket átnevezni **szerződésszegés**, nem részleges siker;
+- a `dropColumn` **mindkettőt** elviszi, és soronként **egyetlen** quarantine-rekordot ír, amelynek
+  `locale` mezője `null` (az `assetId` locale-független), nyers értéke pedig a **teljes**
+  `{ assetId, alt: { … } }` objektum — az `alt` szövegek locale-onként **ebben az egy** rekordban
+  utaznak. Locale-onkénti asset-rekord **nincs**;
+- a foglaltság-predikátum egy asset-oszlopnál az `assets[name]` bejegyzés **létezését** jelenti;
+- az `altRequired` **a `required`-del azonos elbírálás alá esik** a fenti záró-ellenőrzésben. Az
+  `altRequired: false → true` váltás tehát nem láthatatlan a szabályok számára — a régi szöveg
+  éppen ezt az esetet nevesítette.
 
 **Amit ez a szakasz NEM nyújt — és mi ennek a következménye.** Az alábbiak **hiányzó operátorok**,
 nem elfelejtett esetek. Mindegyiknél a következmény **ugyanaz**, és ez a következmény normatív:
@@ -1469,7 +1595,10 @@ ember tölti ki.** Egy implementáció, ami bármelyik alábbi esetben értéket
 
 - **Operátor-kiértékelés:** `O(a manifest oszlop-bejegyzéseinek száma)`. A sorok és a locale-ok
   száma **nem** szorzó.
-- **Elutasítás:** a sémapárból, **egyetlen sor olvasása nélkül**.
+- **Elutasítás:** séma-pár elutasításnál a sémapárból, **egyetlen sor olvasása nélkül**; a
+  foglaltság-predikátumnál **legfeljebb** egy **jelenlét-teszt a manifesttel érintett oszlopokra**
+  (`O(sor × érintett oszlop)` jelenlét-olvasás, **érték-olvasás és operátor-kiértékelés nélkül**).
+  Az `O(oszlop)` költségállítás **az operátor-kiértékelésre** szól, és ott áll is.
 - **Adatírás elfogadás után:** `O(érintett értékek)` — ez sor- és locale-arányos, de ez **másolás,
   illetve rekordba írás**, nem operátor-kiértékelés. A kettő összekeverése az a hiba, amit ez a
   szakasz kizár.
@@ -1491,9 +1620,14 @@ követelményét.
 **A draft-quarantine megszűnik.** A korábbi szöveg a `required`-dé tett kollekció-mező miatt
 publikálásból kizárt sorokra vezetett be egy második, perzisztens naplót. Ez **tárgytalan**:
 (a) a rekord **sosem hordozott eltávolított értéket**, tehát megszüntetése az 1. garanciát nem
-érintheti; (b) az esetet, amit kezelt, most a dry-run `RequiredWithoutDefault` elutasítása **meg sem
-engedi létrejönni**; (c) a hiányzó locale-értékek publikálás-blokkolása a §14.2 publish-policy
-dolga, ami **publikáláskor, az aktuális adatból** számol, nem egy perzisztált migrációs naplóból.
+érintheti; (b) az esetet, amit kezelt — a `required`-dé tett kollekció-mező —, most a dry-run
+**publikálhatósági záró-ellenőrzése** (`RequiredWithoutDefault`, mind a **négy** úton, a kötelezővé
+tételt is beleértve) **meg sem engedi létrejönni**; (c) a hiányzó locale-értékek
+publikálás-blokkolása a §14.2 publish-policy dolga, ami **publikáláskor, az aktuális adatból**
+számol, nem egy perzisztált migrációs naplóból — és a §14.2 **kimondottan** a
+`(collectionName, itemId, locale, fieldName)` négyesre is vonatkozik, nem csak `ContentDoc`-alakú
+mezőkre. A (b) és a (c) premissza tehát nem hivatkozás, hanem két, itt és a §14.2-ben **kimondott**
+szabály.
 A megmaradó **quarantine** fogalom egyetlen, érték-hordozó rekordtípus, és a fenti szerződés
 vonatkozik rá.
 
