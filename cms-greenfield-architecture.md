@@ -1520,7 +1520,7 @@ ennek a szakasznak a garanciája.
 
 A `collections` kulcs eltávolítása a `ContentDoc`-ból megköveteli a meglévő spike-adat átvitelét.
 Ez **nem rekonciliáció, és ezért nem körkörös** — a körkörösség pontosan itt szakad meg, és a
-következő hét szabály mondja meg, hogyan.
+következő **nyolc** szabály mondja meg, hogyan.
 
 1. **A lift nem egyeztet.** Nem old fel nevet semmilyen új template ellen, nincs manifestje, nincs
    auto-matche, nincs operátora. Minden azonosító — `collectionName`, `itemId`, `fieldName`,
@@ -1532,28 +1532,64 @@ következő hét szabály mondja meg, hogyan.
    (`LiftShapeMismatch`), részleges kiemelés nélkül. Ez látható elutasítás: az adat a helyén marad.
 4. **A kiemelt kollekció sémája egyszer, a lift pillanatában áll elő** — a lift **bemenetéül szolgáló,
    régi** szekció-séma `item.fields` blokkjából (a §3.4 korábbi, kollekció-definiáló alakja, ami a
-   `bb0938a` pinen olvasható) és a tényleges adatból. **Ez az egyetlen alkalom, amikor egy
+   `bb0938a` pinen olvasható). **Ez az egyetlen alkalom, amikor egy
    kollekció sémája a designer HTML-jéből származik**, és egyszeri bootstrap, nem szabály: a lift
    **bemenete** a régi világ (a template definiálja a sort), a **kimenete** az új (a kollekció
    definiálja önmagát). Utána a template csak `requires`-szel támaszt követelményt a kollekcióval
    szemben (§16.1), definiálni nem definiálja.
+   **Ha a régi világban több szekció-séma definiál item-mezőket ugyanarra a kollekció-névre**, a
+   lift csak akkor folytatódik, ha a mezőlisták **bitre azonosak**; bármely eltérés →
+   `AmbiguousCollectionBootstrap` (ugyanaz az elutasítás, mint a §4.1 bootstrapnél), és a séma
+   emberi megadása.
+   **Kötelezőség: minden kiemelt oszlop `required: false`.** A régi item-mezőlista `required` kulcsot
+   nem hordoz, és a kötelezőséget **adatból levezetni tilos**: egy mindig kitöltött oszlop nem
+   ugyanaz, mint egy kötelező oszlop, és a levezetés egy **későbbi** ürítéskor publikálásból kizárt
+   sort csinálna — egy olyan liftből, aminek az előnézete „nulla érték változik"-ot ígért (3.
+   garancia). Az `altRequired` kulcs, ha a régi mezőlistában szerepel, **szó szerint** kerül át. A
+   **tényleges adat** a séma előállításába **kizárólag** az 5. szabály elutasítás-ellenőrzésein
+   keresztül szól bele (mely mezőnevek fordulnak elő; egyértelmű-e a típus); **értéket, alapértéket
+   vagy kötelezőséget nem származtat.** (A §16.1 kanonikus `CollectionDoc` példájában látható
+   `required: true` ezért **nem** lift-kimenet, hanem későbbi, emberi séma-szerkesztés eredménye.)
 5. **A sémát nem találjuk ki.** Ha egy sor olyan mezőt hordoz, ami a régi szekció-séma
    item-mezőlistájában nincs benne, vagy a lista olyan mezőt deklarál, amit egyetlen sor sem hordoz
    és a típusa nem egyértelmű, a lift **elutasít** (`LiftSchemaAmbiguity`), és a séma **emberi**
    megadását kéri. A lift után a séma forrása kizárólag a `CollectionDoc`.
 6. **Előnézet és jóváhagyás (3. garancia).** A lift előnézete kollekciónként megadja a sorok számát,
-   az oszlopok nevét és típusát, és **kimondja, hogy nulla érték változik**. A lift **nem termel
+   az oszlopok nevét, típusát, **`required`-ségét és `altRequired`-ségét** (a 4. szabály szerint
+   minden oszlop `required: false`, és `altRequired` csak ott igaz, ahol a régi mezőlista szó
+   szerint így deklarálta), és **kimondja, hogy nulla érték változik**. A lift **nem termel
    quarantine-rekordot**: ha bármely érték quarantine-ba kerülne, az nem lift, hanem migráció, és a
    lift elutasít. Emberi jóváhagyás nélkül nem aktiválódik.
 7. **Írás-sorrend és rollback (4. garancia).** Ez az **egyetlen** entitás-határon átnyúló írás a
-   rendszerben, ezért a sorrend **normatív, nem implementációs részlet**: előbb a `CollectionDoc`-ok
-   íródnak ki, tartalom-hash-re kulcsolt, immutábilis írással; utána a `ContentDoc`
-   `schemaVersion: 4` revíziója, a §16.4 revision-guard alatt. Ha a második írás elbukik, a már
-   kiírt `CollectionDoc`-okra **semmi nem hivatkozik** — inertek —, a lift tehát **idempotensen**
-   újrafuttatható. A `schemaVersion: 3` revízió megmarad; visszaállítása után a `CollectionDoc`-ok
-   inertek maradnak, **visszaállítás nem töröl adatot.** (A §16.5 rögzíti, hogy a spike store-ban a
-   referenciális integritás app-szintű; a fenti sorrend ezért a helyesség feltétele, nem
-   optimalizáció.)
+   rendszerben, ezért a sorrend **normatív, nem implementációs részlet**. **Három** írás van, ebben a
+   sorrendben: (1) a `CollectionDoc`-ok revíziói, tartalom-hash-re kulcsolt, immutábilis írással;
+   (2) a `(siteId, name) → aktuális revízió` **név-pointer** beállítása minden kiemelt kollekcióra —
+   ez az a mutábilis pointer, amin a **név szerinti** kötés-feloldás (`sections[*].collection`)
+   keresztülmegy, és ezért **normatív írás**, nem implementációs mellékhatás; (3) a `ContentDoc`
+   `schemaVersion: 4` revíziója, a §16.4 revision-guard alatt.
+   **Az inertséget nem a hivatkozás hiánya adja, hanem szabály.** A v3 `ContentDoc` **maga is**
+   hordozza a kötéseket (`"collection": "termekek"`), tehát a puszta név a pointer beállítása után
+   feloldódna — az „semmi nem hivatkozik rájuk" indoklás önmagában **hamis**. A kötés-feloldás ezért
+   a `ContentDoc` `schemaVersion`-jén **kapuzott**: egy `schemaVersion: 3` `ContentDoc` a sorokat
+   **kizárólag** a saját `collections` blokkjából oldja fel, és `CollectionDoc`-ot **sosem** olvas;
+   egy `schemaVersion: 4` `ContentDoc` **kizárólag** `CollectionDoc`-ból, és a `collections` blokkot
+   sosem. Nincs harmadik olvasat, és nincs „amelyik létezik" heurisztika.
+   Ha a (3) írás elbukik, a kiírt `CollectionDoc`-ok a fenti kapu miatt **inertek**. A
+   `schemaVersion: 3` revízió megmarad; visszaállítása után is inertek maradnak, **visszaállítás nem
+   töröl adatot.** (A §16.5 rögzíti, hogy a spike store-ban a referenciális integritás app-szintű; a
+   fenti sorrend ezért a helyesség feltétele, nem optimalizáció.)
+8. **A lift célja üres kell legyen (`LiftTargetExists`).** A lift **elutasít**, ha a `(siteId, name)`
+   párra **bármely revízióban** létezik `CollectionDoc` — akkor is, ha a `ContentDoc` épp
+   `schemaVersion: 3`-on áll. Ez zárja le az idempotencia és a rollback együttállását: egy **sikeres**
+   lift után szerkesztett sorok, majd a `ContentDoc` 3-ra visszaállítása után a lift forrása **újra
+   pontosan a v3 alak**, tehát a 3. szabály átengedné, a 2. szabály digestje pedig csak a lift
+   **saját** bemenetét hasonlítja a **saját** kimenetéhez — a meglévő `CollectionDoc`-hoz **soha**.
+   Enélkül a második futás a v3 avult értékeit írná új revízióként a lift utáni szerkesztések fölé,
+   némán. A 7. szabály „idempotensen újrafuttatható" állítása ezért **pontosan egy** esetre szól:
+   ha az (1)–(2) írás megtörtént, de a (3) elbukott. Ekkor az újrafuttatás **folytatásként**
+   engedélyezett, de **csak** akkor, ha a meglévő `CollectionDoc`-ok tartalom-hash-e **bitre
+   egyezik** azzal, amit az aktuális forrás előállítana; ha nem, a lift elutasít
+   (`LiftResumeMismatch`), és emberi döntést kér. Automatikus felülírás nincs.
 
 ### 16.3 Biztonságos render-szerződés — teljes sink-lista + import-izoláció (P0.3 kiegészítés)
 
