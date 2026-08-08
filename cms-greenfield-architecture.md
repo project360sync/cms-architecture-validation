@@ -420,7 +420,10 @@ migráció (nem néma adatvesztés). A név-egyeztetés csak az automatikus alap
 produkciós séma-váltásnál verziózott, tesztelhető migrációs manifest kell
 (`rename`, `transform`, `split`, `merge`, `delete→quarantine`). A re-ingeszt
 tranzakciósan készít preview-verziót, és csak teljes schema/render/asset validáció után
-aktiválható; rollbackhez az előző template + content verzió együtt marad meg.
+aktiválható; rollbackhez az előző template + content verzió együtt marad meg — a **visszaállítás
+maga** viszont nem szabad művelet: a §16.2.2 `RollbackBindingBreak` szabálya szerint a
+kötés-invariánst a `CollectionDoc`-ok **aktuális** sémái ellen újra kell futtatni, mert egy időközbeni
+oszlop-migráció a régi template-verziót rollback-célként megmérgezhette.
 
 ---
 
@@ -1378,7 +1381,35 @@ revízióban landolni, a migráció **nem aktiválható**. A `CollectionDoc`-ok 
 határon belül, mert a redesign nem írja őket; ezért a `StaleMigration` ablakát egy párhuzamos
 **sor-érték-szerkesztés nem nyitja meg** — a sorok **számát** változtató szerkesztés viszont igen,
 a fenti darabszám-pin szerint. Az aktiválás után az **előző template- és content-verzió
-megmarad**, hogy a rollback végrehajtható legyen. A jóváhagyott diffet ezen felül **digest köti** az
+megmarad**, hogy a rollback végrehajtható legyen.
+
+**A rollback nem mentesül a kötés-invariáns alól (`RollbackBindingBreak`).** A megmaradó előző
+verzió a rollback **feltétele**, de a visszaállítás **nem** puszta pointer-átállítás: a §16.1
+kötés-invariánsa „a publish és a dry-run fail-closed hibája"-ként van kimondva, és egy
+revízió-visszaállítás **egyik sem**. Ezért: **egy `ContentDoc`-revízió visszaállítása előtt a
+rendszer újrafuttatja a §16.1 kötés-invariánst** — a visszaállítandó revízió `templateVersion`-je
+szerinti `requires` listákat a `CollectionDoc`-ok **AKTUÁLIS** sémái ellen —, és ha a visszaállítás
+`UnboundCollection`-t vagy `UnsatisfiedBinding`-et eredményezne, a visszaállítás **elutasítva**
+(`RollbackBindingBreak`), a megnevezett kötéssel és a hiányzó oszloppal együtt. Nem néma siker,
+amit a következő publish bukik meg.
+
+Az ok nem elméleti: **minden `dropColumn` és minden `renameColumn`, ami egy `requires`-ben szereplő
+oszlopot érint, megmérgezi rollback-célként azokat a template-verziókat, amelyek alatta éltek.** A
+legélesebb eset éppen az **összekapcsolt kiadás** (§16.2.3): az **pontosan akkor** létezik, amikor a
+régi template `requires`-ét az új séma **nem** elégíti ki — tehát a `tpl_12`-re való visszaállítás
+két nappal később **definíció szerint** kielégítetlen kötést adna, és a következő publish tartósan
+fail-closed lenne. A feloldás **emberi**, két úton: vagy a kollekció-oldali változás visszavonása
+egy **saját** oszlop-migrációval (a szótár szerint, saját dry-runnal és jóváhagyással), vagy egy
+**előre** vezető template-verzió választása rollback-célként. A rendszer **nem** old fel
+automatikusan, és **nem** ír `CollectionDoc`-ot rollback ürügyén.
+
+**Az összekapcsolt kiadás rollbackja FORDÍTOTT sorrendű, és egyetlen aktus.** Egy összekapcsolt
+kiadás két írását **együtt** kell visszavonni, és **fordítva**: előbb a (2) `ContentDoc`-revízió áll
+vissza a kiadás előtti `templateVersion`-re, **majd** az (1) `CollectionDoc`-revízió a kiadás előtti
+sémára. A sorrend nem ízlés kérdése: az egyenes sorrend a **régi** template-et állítaná vissza az
+**új** séma mellé — pontosan az az állapot, amiért az összekapcsolt kiadás egyáltalán létezik. A két
+visszaállítás közötti ablakban a publish **blokkolva van**, ugyanazzal a blokkal (§16.4). Ha csak az
+egyik fél visszavonása kérhető, a művelet **elutasítva** (`RollbackBindingBreak`). A jóváhagyott diffet ezen felül **digest köti** az
 aktiváláshoz — `planDigest`, eltérés esetén `PlanDigestMismatch`, a jóváhagyó identitásával és
 időbélyegével együtt tárolva —; a definíció a §16.2.3 „Mit hagy jóvá az ember" bekezdésében áll, és
 **mindkét hatókörre** vonatkozik.
@@ -1584,16 +1615,47 @@ akkor a lenti szabály szerint.
 
 **Az összekapcsolt kiadás.** A `coupledTemplateVersion` egy **már elkészített, validált, de még nem
 élő** template-verzió. A dry-run ekkor a **migráció utáni** sémát **ennek** a template-verziónak a
-`requires` listái ellen ellenőrzi, és az elfogadott terv **egyetlen jóváhagyás** alá esik, amely
-**mindkét** aktiválást lefedi. Végrehajtás: (1) a `CollectionDoc` új revíziója landol; (2) a
-`ContentDoc` a `coupledTemplateVersion`-re vált, a §16.2.2 redesign-szerződése szerint. A két írás
-között a **publish blokkolva van** (§16.4), és a köztes állapotból **nem készül snapshot**. Ha a
-(2) elbukik, az (1) **revízió-visszaállítással visszavonódik** (4. garancia), és ez naplózott
-esemény, nem néma állapot. **Ez nem kivétel a §16.2.1 tilalma alól:** nem egy revízióban ír két
-entitást, hanem két, saját revízió-vonalán landoló írást köt **egyetlen jóváhagyáshoz és egyetlen
-publish-ablakhoz**; az egyetlen entitás-határon átnyúló **írás** továbbra is a §16.2.4 lift. Az
-összekapcsolt kiadás nélkül egy `requires`-ben szereplő oszlop átnevezése **nem futtatható** —
-sem előbb, sem utóbb (§16.2.1).
+`requires` listái ellen ellenőrzi.
+
+**A jóváhagyás tárgya ilyenkor KÉT diff, EGYETLEN objektumként.** A korábbi szöveg „egyetlen
+jóváhagyás, amely mindkét aktiválást lefedi"-t mondott, a tárolt digest viszont az **oszlop-terv**
+digestje volt — a redesign-fél így **kötetlen** maradt: egy implementáció a (2) lépést puszta
+`templateVersion`-váltásként hajthatta volna végre, és az oldal-hatókörű egyeztetés — a forrás-oldali
+partíció, a cél-oldali lista és a **kötés-szintű rész** — diff, jóváhagyás és quarantine-áttekintés
+**nélkül** landolt volna. Az 1. és a 3. garancia így pont abban a konstrukcióban sérülne, amit a 3.
+garancia védelmére építettünk. Ezért:
+
+- az összekapcsolt kiadás dry-runja **mindkét** dry-runt lefuttatja: az oszlop-migráció §16.2.3
+  szerinti **tervét** **és** a `(jelenleg élő templateVersion → coupledTemplateVersion)`
+  redesign-migráció §16.2.2 szerinti **teljes, három részes** diffjét — utóbbit a **migráció utáni**
+  kollekció-séma ellen, mert a redesign azt fogja látni;
+- a kettő **egyetlen jóváhagyandó objektumot** alkot (`CoupledReleasePlan`), amit az ember
+  **együtt** lát és **együtt** hagy jóvá; **részleges jóváhagyás nincs**, és bármelyik fél bármely
+  kötelező elutasítása a **teljes** összekapcsolt kiadást utasítja el (fail-closed);
+- **egyetlen digest köti a kettőt:** `planDigest = digest(az oszlop-terv digestje, a redesign-diff
+  digestje)`, mindkét fél a **saját hatóköre** tag-listájával számolva (lásd „A tervet digest köti").
+  Az aktiválás **mindkét** felet újraszámolja; bármelyik eltérésénél `PlanDigestMismatch`;
+- **a `coupledTemplateVersion` nem tesz egy manifestet vegyes hatókörűvé.** Ezt ki kell mondani,
+  mert a §16.2.1 `MixedMigrationScope` szabálya különben ráfutna: a `coupledTemplateVersion` **nem**
+  oldal-hatókörű bejegyzés, hanem a kollekció-manifest **egyetlen, nevesített kulcsa**, amely egy
+  template-verzióra **hivatkozik**. A `MixedMigrationScope` alól **kizárólag ez az egy kulcs**
+  kivétel, névvel: ha a kollekció-manifest **oldal-hatókörű operátort** is hordoz (`rename`, `move`,
+  `transform`, `split`, `merge`, `delete`, `rebindCollection`), az **változatlanul**
+  `MixedMigrationScope`. A redesign-fél manifestje **külön manifest**, az oldal-hatókör saját
+  kulcsára (`from- → to-templateVersion`) kulcsolva; a `CoupledReleasePlan` **két manifestet**
+  hordoz, nem egy vegyeset.
+
+Végrehajtás: (1) a `CollectionDoc` új revíziója landol; (2) a `ContentDoc` a
+`coupledTemplateVersion`-re vált, **a jóváhagyott redesign-diff sorait írva** — quarantine-rekordostul,
+egyetlen revízióban —, a §16.2.2 redesign-szerződése szerint. A két írás között a **publish blokkolva
+van** (§16.4, ahol a blokk a saját szavaival áll), és a köztes állapotból **nem készül snapshot**. Ha
+a (2) elbukik vagy elmarad, az állapot **nevesített és gazdás** (`CoupledReleaseIncomplete`, §16.4):
+sem néma önjavítás, sem automatikus időzített undo nincs; a lezárás vagy a (2) megismétlése a tárolt,
+jóváhagyott diffből, vagy a §16.2.2 **fordított sorrendű** összekapcsolt rollbackja. **Ez nem kivétel
+a §16.2.1 tilalma alól:** nem egy revízióban ír két entitást, hanem két, saját revízió-vonalán
+landoló írást köt **egyetlen jóváhagyáshoz és egyetlen publish-ablakhoz**; az egyetlen
+entitás-határon átnyúló **írás** továbbra is a §16.2.4 lift. Az összekapcsolt kiadás nélkül egy
+`requires`-ben szereplő oszlop átnevezése **nem futtatható** — sem előbb, sem utóbb (§16.2.1).
 
 **Új oszlop.** A cél-oldali listán jelenik meg: `new-empty`, ha nincs kitöltése, `default-filled`, ha
 a manifest **explicit** alapértéket ad. Az implementáció **sosem talál ki alapértéket** (üres string
@@ -2025,12 +2087,42 @@ concurrency nélkül:
   revíziózás mellett a §16.2.3 `StaleMigration`-je értelmét vesztené, mert nem lenne **egy** bázis,
   amihez az aktiválás hasonlíthat. Minden sor-írás is a **teljes dokumentum** bázis-revízióját
   hordozza, és stale bázissal elutasításra kerül.
-- **Zárolás oszlop-migráció alatt.** A §15.7 pesszimista edit-lockja oldal-szintű; a kollekció
-  ugyanezt **kollekció-szinten** kapja: a dry-run jóváhagyásától az aktiválás végéig a kollekció
-  szerkesztése **blokkolva/sorolva** van („épp migrálunk…"), ugyanúgy, ahogy a §15.7 a publish alatti
-  editet blokkolja. Ez **nem** váltja ki a revision-guardot: TTL-lejárat vagy force-unlock után is a
-  bázis-revízió dönt (`StaleMigration`). Ugyanez a blokk fedi a §16.2.3 **összekapcsolt kiadásának**
-  két írása közötti ablakot.
+- **Zárolás oszlop-migráció alatt — és a PUBLISH blokkja, saját szavakkal.** A §15.7 pesszimista
+  edit-lockja oldal-szintű; a kollekció ugyanezt **kollekció-szinten** kapja: a dry-run
+  jóváhagyásától az aktiválás végéig a kollekció szerkesztése **blokkolva/sorolva** van („épp
+  migrálunk…"). Ez **nem** váltja ki a revision-guardot: TTL-lejárat vagy force-unlock után is a
+  bázis-revízió dönt (`StaleMigration`). **Ez a pont eddig csak a SZERKESZTÉST blokkolta**, a
+  §16.2.3 viszont „a publish blokkolva van (§16.4)"-re hivatkozott — olyan szabályra, ami itt nem
+  állt, és amit a §15.7 lockja **nem** ad meg (az konstrukció szerint editor↔editor). Ezért
+  kimondva: **egy jóváhagyott, még nem befejezett oszlop-migráció vagy összekapcsolt kiadás alatt a
+  `publish` is blokkolva van** az érintett site-ra, és a blokk **fail-closed**: a publish-kérés
+  `MigrationInProgress` hibával **elutasítva**, nem a végtelenségig sorolva. A blokk hatóköre a
+  **site**, mert a snapshot site-szintű. Enélkül az összekapcsolt kiadás két írása közötti köztes
+  állapotból **snapshot készülhetne** — pontosan az, amit a §16.2.3 kizár.
+- **A blokknak lejárata, gazdája és megszüntetési útja van.** Egy jóváhagyott terv nem blokkolhat
+  határozatlan ideig — az eddigi szöveg nem mondott sem lejáratot, sem visszavonást, sem gazdát:
+  - **TTL:** a jóváhagyás **lejár** (v1: 30 perc az utolsó jóváhagyói aktus után). Lejárat után a
+    terv **nem aktiválható** (`MigrationApprovalExpired`), a blokk **feloldódik**, a szerkesztés és
+    a publish újraindul. A lejárt terv nem tűnik el: rögzített és auditált, újrafuttatható — de
+    **új dry-runnal és új jóváhagyással**. A TTL lejárta **sosem aktivál** semmit, és **sosem
+    vonja vissza** egy már landolt írás hatását.
+  - **Explicit visszavonás:** a jóváhagyó vagy egy admin a tervet bármikor **eldobhatja**
+    (`cancel`); a blokk azonnal feloldódik. A visszavonás **naplózott** esemény, a `planDigest`-tel
+    és az eldobó identitásával.
+  - **Gazda:** a blokk gazdája a **jóváhagyó**; force-unlock **csak admin**, és a §15.7
+    **fencing-tokenje** alatt, hogy a lejárt blokk késői aktiválása ne érvényesüljön.
+  - **Megszakadt összekapcsolt kiadás (`CoupledReleaseIncomplete`).** Ha a §16.2.3 (1) írása
+    landolt, de a (2) elbukott vagy elmaradt (folyamat-összeomlás), az állapot **nevesített**, és
+    **nem** tartozik a TTL hatálya alá: a TTL lejárta a blokkot ebben az állapotban **nem** oldja
+    fel, mert a köztes állapot sem nem publikálható, sem nem szerkeszthető — a §15.7 lock lejárta
+    után újrainduló szerkesztés olyan sor-írásokat termelne, amiket az (1) kötelező visszavonása
+    **némán eldobna**. Az állapot **gazdája ugyanaz az admin szerepkör**, amelyik a force-unlockot
+    birtokolja, és **kétféleképp** zárható: **előre** — a (2) írás megismétlése a tárolt,
+    jóváhagyott redesign-diffből (a `planDigest` változatlanul köti) —, vagy **vissza** — a §16.2.2
+    **fordított sorrendű** összekapcsolt rollbackja, `RollbackBindingBreak`-kel kapuzva. Amíg egyik
+    sem történt meg, a site `CoupledReleaseIncomplete` állapotban áll, a blokk él, és ez a
+    **felületen látszik**. Néma önjavítás, automatikus időzített undo és „majd a következő írás
+    rendezi" **nincs**.
 
 ### 16.5 Store — a §15.5 #5 ⟂ §15.7 szóhasználat feloldva
 
