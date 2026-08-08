@@ -1481,6 +1481,19 @@ explicit `renameColumn` bejegyzéssel vihetők tovább, minden fedezetlen oszlop
 megfelelője**, és ugyanaz a 2. garancia áll mögötte. Egy oszlop változatlan továbbvitele az azonos
 forrású és célú `renameColumn: (c,f) → (c,f)` bejegyzéssel mondható ki; ez **nem** új operátor.
 
+**Oszlop eltűnése tiszta halmazban, néma manifesttel — quarantine, nem elutasítás.** Ez a
+leggyakoribb migráció-alak (régi `{title, desc}` → új `{title}`, üres manifest), ezért a válasz
+kimondva: ha az oszlopnév-halmaz **tiszta törlés** (csak eltűnő név van, megjelenő nincs), és a
+manifest az eltűnő oszlopról **hallgat**, a dry-run **nem utasít el**: az oszlop minden értéke
+quarantine-ba kerül `orphan` okkal, és a diff **kötelezően** hoz rá egy `quarantined` oszlop-sort a
+darabszámmal és a jóváhagyás előtti érték-nézettel. Ez a §4.4 precedense („eltűnt → jelöljük, nem
+dobjuk némán"), és ezt feltételezi a szakasz saját ok-enumja is, amely az `orphan`-t felsorolja. A
+néma manifest tehát **nem** néma veszteség, de **nem is** néma jóváhagyás: az ember a `quarantined`
+sort látja, és azt hagyja jóvá. Az explicit `dropColumn` ettől **nem felesleges** — az teszi a
+szándékot kimondottá, és az elutasításaival védi a hazug bejegyzés ellen (pl. ha az oszlop mégis
+benne van az új sémában). Ha a halmaz **nem tiszta**, ez a szabály nem alkalmazható: ott az
+`impure-columns` szabály fut, és a fedezetlen oszlopok azon az okon mennek quarantine-ba.
+
 **Típusváltás nincs a szótárban.** Ha egy megmaradó nevű oszlop típusa megváltozik, az **nem
 maradék**, és nincs rá operátor: az oszlop minden értéke quarantine-ba kerül (`type-changed`), az
 oszlop a migráció után **érték nélkül** áll, és a diff ezt oszlop-sorként, az érintett értékek
@@ -1633,12 +1646,46 @@ vonatkozik rá.
 
 **Dry-run, jóváhagyás, aktiválás.** Ugyanaz a szerződés, mint az oldal-hatókörben, egy szinttel
 lejjebb: a dry-run diff a jóváhagyás **tárgya és egyben az aktiválás bemenete**; hordozza a bázis
-`CollectionDoc`-revíziót és a `(from- → to-collectionSchemaVersion)` párt; az aktiválás **pontosan**
-a jóváhagyott sorokat írja, nem újraszámolt eredményt; eltérő bázis-revízió vagy séma-verzió esetén
-`StaleMigration` és új dry-run; az aktiválás **egyetlen írás, egyetlen bázis-revízióval** (a §16.4
-revision-guard alatt), és az új sor-állapot, a quarantine-rekordok és a `collectionSchemaVersion`
-váltása **ugyanabban a revízióban** landol. Ha nem tudnak együtt landolni, a migráció nem
-aktiválható. Az előző revízió megmarad.
+`CollectionDoc`-revíziót és a `(from- → to-collectionSchemaVersion)` párt; eltérő bázis-revízió vagy
+séma-verzió esetén `StaleMigration` és új dry-run; az aktiválás **egyetlen írás, egyetlen
+bázis-revízióval** (a §16.4 revision-guard alatt), és az új sor-állapot, a quarantine-rekordok és a
+`collectionSchemaVersion` váltása **ugyanabban a revízióban** landol. Ha nem tudnak együtt landolni,
+a migráció nem aktiválható. Az előző revízió megmarad.
+
+**Mit hagy jóvá az ember, és mi köti az aktiválást ehhez.** Oszlop-hatókörön a jóváhagyás tárgya egy
+**oszlop-szintű terv**, nem érték-szintű íráslista — a diff értéket nem hordoz, csak darabszámot —,
+ezért a §16.2.2 „pontosan a jóváhagyott sorokat írja" mondata itt **oszlop-sorokra** értendő. Hogy ez
+ne üres ígéret legyen, három dolog köti:
+
+- **A terv determinisztikus, és a kifejtése a pinelt bázison történik.** Az aktiválás az
+  érték-szintű kifejtést **újraszámolja**, de **kizárólag a tervbe pinelt bázis-`CollectionDoc`-
+  revízió fölött**, ugyanazzal a determinisztikus szabálykészlettel (a fenti (A) egyidejűség
+  szerint). Azonos bázis + azonos terv = azonos írás; **ez** elégíti ki oszlop-szinten a „nem
+  újraszámolt eredmény" követelményt. Rejtett, `O(sor)` méretű, előre materializált íráslista
+  jóváhagyása **nincs** — az az objektum, amit az ember jóváhagy, ugyanaz, mint amit az aktiválás
+  bemenetként kap.
+- **A tervet digest köti.** A jóváhagyott terv kanonikus digestje —
+  `planDigest = digest(bázis-revízió, from → to séma-verzió, a manifest kanonikus alakja, az
+  oszlop-sorok listája a darabszámokkal)` — a jóváhagyással együtt tárolódik, a **jóváhagyó
+  identitásával és időbélyegével**. Az aktiválás a beadott tervből **újraszámolja** a digestet, és
+  eltérés esetén **elutasít** (`PlanDigestMismatch`). **Ugyanez a kötés vonatkozik az oldal-hatókörre
+  is** (§16.2.2 jóváhagyott diffje): előnézet és alkalmazás között a manipuláció így nem korlátlan.
+- **A quarantine-ba kerülő értékek a jóváhagyás ELŐTT megtekinthetők.** Minden olyan oszlop-sornál,
+  ahol értékek quarantine-ba mennek (`dropColumn`, `type-changed`, `impure-columns`, `orphan`), a
+  diff a darabszám mellett **kötelezően** ad egy lapozható, az adott oszlopra szűrt **érték-nézetet**
+  a pinelt bázis-revízióból. A jóváhagyandó **objektum** `O(oszlop)` marad — ezer sort senki nem hagy
+  jóvá egy átnevezésért —, de az 1. garancia „az ember **látja**" követelménye **nem szűkül egy egész
+  számra**: 500 érték eldobásához a **megtekintés lehetősége** a jóváhagyás pillanatában fennáll. Egy
+  implementáció, amely az értékeket csak aktiválás **után** teszi olvashatóvá, ezt a szakaszt
+  megsérti.
+
+**A quarantine-rekordok életciklusa.** A dry-run **nem** hoz létre quarantine-rekordot: egy elhagyott
+előnézet nem hagy maga után rekordot, és nincs olyan rekordhalmaz, ami egyetlen diffhez sem
+tartozik. Az érték-nézet **nem rekordokra mutat**, hanem a **pinelt, immutábilis bázis-revízióra** —
+az értékek azért olvashatók a jóváhagyás előtt, mert a régi revízió megmarad (4. garancia), nem mert
+előre írnánk valamit. A rekordok az **aktiválással**, ugyanabban a revízióban keletkeznek (különben a
+migráció nem aktiválható), és hordozzák a `planDigest`-et, ami a rekordhalmazt ahhoz a **konkrét**
+jóváhagyott diffhez köti. Ugyanez áll az oldal-hatókörre.
 
 **Az oszlop-hatókörön nincsenek operátor-inverzek.** A `rollback` **revízió-visszaállítás**, nem
 inverz operátor-lánc: az előző `CollectionDoc`-revízió tartalmazza a régi sémát és a régi értékeket.
